@@ -6,41 +6,85 @@ let image = NSImage(size: size)
 
 image.lockFocus()
 
-NSColor(calibratedRed: 0.063, green: 0.075, blue: 0.094, alpha: 1).setFill()
-NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), xRadius: 220, yRadius: 220).fill()
+// Background gradient
+let bgGradient = NSGradient(starting: NSColor(calibratedRed: 0.05, green: 0.05, blue: 0.12, alpha: 1.0),
+                           ending: NSColor(calibratedRed: 0.10, green: 0.08, blue: 0.20, alpha: 1.0))
+bgGradient?.draw(in: NSRect(x: 0, y: 0, width: size.width, height: size.height), angle: 135)
 
-let shadow = NSShadow()
-shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
-shadow.shadowBlurRadius = 28
-shadow.shadowOffset = NSSize(width: 0, height: -12)
-shadow.set()
+// Outer glow ring
+let glowRing = NSColor(calibratedRed: 0.30, green: 0.60, blue: 0.90, alpha: 0.3)
+glowRing.setStroke()
+let ringPath = NSBezierPath(ovalIn: NSRect(x: 80, y: 80, width: 864, height: 864))
+ringPath.lineWidth = 24
+ringPath.stroke()
 
-let gold = NSColor(calibratedRed: 0.957, green: 0.827, blue: 0.369, alpha: 1)
-let blue = NSColor(calibratedRed: 0.384, green: 0.714, blue: 0.796, alpha: 1)
-let green = NSColor(calibratedRed: 0.482, green: 0.788, blue: 0.314, alpha: 1)
+// Inner hexagon
+let hexPath = NSBezierPath()
+let center = NSPoint(x: size.width / 2, y: size.height / 2)
+let radius: CGFloat = 280
+for i in 0..<6 {
+    let angle = CGFloat(i) * CGFloat.pi / 3 - CGFloat.pi / 6
+    let point = NSPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+    if i == 0 {
+        hexPath.move(to: point)
+    } else {
+        hexPath.line(to: point)
+    }
+}
+hexPath.close()
 
-let paragraph = NSMutableParagraphStyle()
-paragraph.alignment = .center
+let hexFill = NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.22, alpha: 1.0)
+hexFill.setFill()
+hexPath.fill()
 
-let font = NSFont.systemFont(ofSize: 520, weight: .heavy)
-let attributes: [NSAttributedString.Key: Any] = [
-    .font: font,
-    .foregroundColor: gold,
-    .paragraphStyle: paragraph
-]
+let hexStroke = NSColor(calibratedRed: 0.50, green: 0.75, blue: 1.0, alpha: 0.8)
+hexStroke.setStroke()
+hexPath.lineWidth = 12
+hexPath.stroke()
 
-let text = "A"
-let textRect = NSRect(x: 0, y: 250, width: size.width, height: 560)
-text.draw(in: textRect, withAttributes: attributes)
+// Inner circle
+let innerRing = NSBezierPath(ovalIn: NSRect(x: 312, y: 312, width: 400, height: 400))
+let innerFill = NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.16, alpha: 1.0)
+innerFill.setFill()
+innerRing.fill()
 
-shadow.shadowBlurRadius = 0
-shadow.set()
+let innerStroke = NSColor(calibratedRed: 0.60, green: 0.85, blue: 1.0, alpha: 0.5)
+innerStroke.setStroke()
+innerRing.lineWidth = 6
+innerRing.stroke()
 
-blue.setFill()
-NSBezierPath(roundedRect: NSRect(x: 220, y: 180, width: 584, height: 84), xRadius: 42, yRadius: 42).fill()
+// Center dot
+let dotPath = NSBezierPath(ovalIn: NSRect(x: 462, y: 462, width: 100, height: 100))
+let dotFill = NSColor(calibratedRed: 0.90, green: 0.85, blue: 0.30, alpha: 1.0)
+dotFill.setFill()
+dotPath.fill()
 
-green.setFill()
-NSBezierPath(ovalIn: NSRect(x: 748, y: 738, width: 128, height: 128)).fill()
+// Circuit lines from hexagon vertices
+let circuitColor = NSColor(calibratedRed: 0.30, green: 0.75, blue: 0.90, alpha: 0.4)
+circuitColor.setStroke()
+for i in 0..<6 {
+    let angle = CGFloat(i) * CGFloat.pi / 3 - CGFloat.pi / 6
+    let hexPoint = NSPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+    let lineLen: CGFloat = 100 + CGFloat(i % 3) * 40
+    let endPoint = NSPoint(x: center.x + (radius + lineLen) * cos(angle), y: center.y + (radius + lineLen) * sin(angle))
+    let circuitPath = NSBezierPath()
+    circuitPath.move(to: hexPoint)
+    circuitPath.line(to: endPoint)
+    circuitPath.lineWidth = 4
+    circuitPath.stroke()
+}
+
+// Small accent dots at circuit endpoints
+let accentColor = NSColor(calibratedRed: 0.40, green: 0.90, blue: 0.80, alpha: 0.8)
+accentColor.setFill()
+for i in 0..<6 {
+    let angle = CGFloat(i) * CGFloat.pi / 3 - CGFloat.pi / 6
+    let lineLen: CGFloat = 100 + CGFloat(i % 3) * 40
+    let dotPoint = NSPoint(x: center.x + (radius + lineLen) * cos(angle), y: center.y + (radius + lineLen) * sin(angle))
+    let dotRect = NSRect(x: dotPoint.x - 8, y: dotPoint.y - 8, width: 16, height: 16)
+    let dot = NSBezierPath(ovalIn: dotRect)
+    dot.fill()
+}
 
 image.unlockFocus()
 

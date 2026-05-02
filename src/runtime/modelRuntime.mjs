@@ -20,26 +20,50 @@ export async function testModelConnection(settings, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = Date.now();
+
+  // Detect provider from baseUrl
+  const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+  const isMiniMax = baseUrl.includes('minimax.io');
+
   try {
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${secret.value}`
-      },
-      body: JSON.stringify({
-        model: settings.model || 'gpt-5.2',
-        messages: [
-          {
-            role: 'user',
-            content: 'Reply with OK.'
-          }
-        ],
-        temperature: 0,
-        max_tokens: 16
-      })
-    });
+    let response;
+    if (isMiniMax) {
+      response = await fetch(`${baseUrl}/messages`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          'authorization': `Bearer ${secret.value}`,
+          'x-api-key': secret.value,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: settings.model || 'MiniMax-M2.7',
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Reply with OK.' }]
+        })
+      });
+    } else {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${secret.value}`
+        },
+        body: JSON.stringify({
+          model: settings.model || 'gpt-5.2',
+          messages: [
+            {
+              role: 'user',
+              content: 'Reply with OK.'
+            }
+          ],
+          temperature: 0,
+          max_tokens: 16
+        })
+      });
+    }
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
@@ -56,7 +80,9 @@ export async function testModelConnection(settings, timeoutMs = 15000) {
     return {
       ok: true,
       status: 'ok',
-      message: payload?.choices?.[0]?.message?.content || 'OK',
+      message: isMiniMax
+        ? (payload?.content?.[0]?.text || 'OK')
+        : (payload?.choices?.[0]?.message?.content || 'OK'),
       latencyMs,
       model: payload?.model || settings.model,
       apiKeySource: secret.source

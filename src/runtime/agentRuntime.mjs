@@ -1,5 +1,6 @@
 import { DemoRuntime } from './adapters/DemoRuntime.mjs';
 import { OpenAICompatibleRuntime } from './adapters/OpenAICompatibleRuntime.mjs';
+import { MiniMaxRuntime } from './adapters/MiniMaxRuntime.mjs';
 import { HermesRuntime } from './adapters/HermesRuntime.mjs';
 import { OpenClawGatewayAdapter } from './adapters/OpenClawGatewayAdapter.mjs';
 import { OpenCoworkSandboxAdapter } from './adapters/OpenCoworkSandboxAdapter.mjs';
@@ -47,6 +48,11 @@ function shouldListWorkspace(prompt) {
 
 export function createAgentRuntime(settings, { skills, memories, tools }) {
   const runtimeMode = settings.runtimeMode || 'demo';
+  const baseUrl = (settings.baseUrl || '').replace(/\/+$/, '');
+
+  // Auto-detect provider from baseUrl to handle "remote" mode intelligently
+  const isMiniMax = baseUrl.includes('minimax.io');
+  const isOpenAI = baseUrl.includes('openai.com') || baseUrl.includes('azure.com');
 
   switch (runtimeMode) {
     case 'hermes':
@@ -55,9 +61,16 @@ export function createAgentRuntime(settings, { skills, memories, tools }) {
       return new OpenClawGatewayAdapter({ settings, skills, memories, tools });
     case 'opencowork':
       return new OpenCoworkSandboxAdapter({ settings, skills, memories, tools });
+    case 'minimax':
+      return new MiniMaxRuntime({ settings, skills, memories, tools });
     case 'remote':
+      if (isMiniMax) return new MiniMaxRuntime({ settings, skills, memories, tools });
+      if (isOpenAI) return new OpenAICompatibleRuntime({ settings, skills, memories, tools });
+      return new MiniMaxRuntime({ settings, skills, memories, tools });
     case 'openai':
+      return new OpenAICompatibleRuntime({ settings, skills, memories, tools });
     case 'anthropic':
+      if (isMiniMax) return new MiniMaxRuntime({ settings, skills, memories, tools });
       return new OpenAICompatibleRuntime({ settings, skills, memories, tools });
     case 'demo':
     default:

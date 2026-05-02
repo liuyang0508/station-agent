@@ -1,5 +1,5 @@
 export const referenceBlueprint = {
-  productName: 'AIAgent Client',
+  productName: 'Station Agent',
   positioning: '本地优先的专业 AI Agent 客户端，面向个人和团队的自动化工作台。',
   references: [
     {

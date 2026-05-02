@@ -47,9 +47,18 @@ swiftc "$ROOT_DIR/macos/GenerateIcon.swift" \
   -clang-scanner-module-cache-path "$MODULE_CACHE_DIR/clang-scanner" \
   -framework AppKit
 
-"$ROOT_DIR/.build/generate-icon" "$ICON_BUILD_DIR/AIAgentIcon-1024.png"
-sips -s format tiff "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/AIAgentIcon.tiff" >/dev/null
-tiff2icns "$ICON_BUILD_DIR/AIAgentIcon.tiff" "$RESOURCES_DIR/AIAgentIcon.icns"
+mkdir -p "$ICON_BUILD_DIR/icon.iconset"
+sips -z 16 16 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_16x16.png" >/dev/null
+sips -z 32 32 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_16x16@2x.png" >/dev/null
+sips -z 32 32 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_32x32.png" >/dev/null
+sips -z 64 64 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_32x32@2x.png" >/dev/null
+sips -z 128 128 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_128x128.png" >/dev/null
+sips -z 256 256 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_128x128@2x.png" >/dev/null
+sips -z 256 256 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_256x256.png" >/dev/null
+sips -z 512 512 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_256x256@2x.png" >/dev/null
+sips -z 512 512 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_512x512.png" >/dev/null
+sips -z 1024 1024 "$ICON_BUILD_DIR/AIAgentIcon-1024.png" --out "$ICON_BUILD_DIR/icon.iconset/icon_512x512@2x.png" >/dev/null
+iconutil -c icns "$ICON_BUILD_DIR/icon.iconset" -o "$RESOURCES_DIR/AIAgentIcon.icns"
 
 cp "$ROOT_DIR/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/package.json" "$APP_RESOURCE_DIR/package.json"
