@@ -1,0 +1,749 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
+import { pipeline } from 'node:stream/promises';
+import JSZip from 'jszip';
+import { JsonStore } from './lib/store.mjs';
+import { runReadOnlyCommand, validateReadOnlyCommand } from './lib/commandRunner.mjs';
+import { McpManager } from './lib/mcpManager.mjs';
+import { referenceBlueprint, summarizeReferences } from './lib/referenceBlueprint.mjs';
+import { validateWorkspacePath, redactSecret } from './lib/safety.mjs';
+import { deleteModelApiKey, readModelApiKey, writeModelApiKey } from './lib/secrets.mjs';
+import { exportSessionJson, exportSessionMarkdown } from './lib/sessionExport.mjs';
+import { installSkillFromWorkspace, runSkill } from './lib/skillManager.mjs';
+import { listWorkspaceDirectory, readWorkspaceFile } from './lib/workspace.mjs';
+import { runAgentTurn } from './runtime/agentRuntime.mjs';
+import { parseSkillMarkdown } from './lib/skillFormats.mjs';
+import { SkillEvolution } from './lib/skillEvolution.mjs';
+import { testModelConnection } from './runtime/modelRuntime.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const publicDir = path.join(projectRoot, 'public');
+const store = new JsonStore();
+const mcpManager = new McpManager({ store });
+const runs = new Map();
+const startedAt = new Date();
+
+function loadBuildInfo() {
+  const buildInfoPath = path.join(projectRoot, 'build-info.json');
+  if (!fs.existsSync(buildInfoPath)) {
+    return {
+      id: 'development',
+      builtAt: null
+    };
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(buildInfoPath, 'utf8'));
+  } catch {
+    return {
+      id: 'unknown',
+      builtAt: null
+    };
+  }
+}
+
+const contentTypes = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.json': 'application/json; charset=utf-8'
+};
+
+function parseArgs() {
+  const portIndex = process.argv.indexOf('--port');
+  const port = portIndex >= 0 ? Number(process.argv[portIndex + 1]) : Number(process.env.PORT || 47891);
+  return {
+    port,
+    doctor: process.argv.includes('--doctor')
+  };
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(payload, null, 2));
+}
+
+function notFound(res) {
+  sendJson(res, 404, { error: 'Not found' });
+}
+
+function parseJson(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) {
+        reject(new Error('请求体过大'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function serveStatic(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const requestedPath = url.pathname === '/' ? '/index.html' : url.pathname;
+  const target = path.resolve(publicDir, `.${requestedPath}`);
+  const validation = validateWorkspacePath(publicDir, target);
+
+  if (!validation.allowed || !fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+    notFound(res);
+    return;
+  }
+
+  const ext = path.extname(target);
+  res.writeHead(200, {
+    'content-type': contentTypes[ext] || 'application/octet-stream',
+    'cache-control': 'no-store'
+  });
+  fs.createReadStream(target).pipe(res);
+}
+
+function healthSnapshot() {
+  const settings = store.getSettings();
+  const modelSecret = readModelApiKey(settings.apiKeyEnv);
+  return {
+    ok: true,
+    name: referenceBlueprint.productName,
+    version: '0.1.0',
+    build: loadBuildInfo(),
+    runtime: {
+      mode: settings.runtimeMode,
+      provider: settings.provider,
+      model: settings.model,
+      baseUrlConfigured: Boolean(settings.baseUrl),
+      apiKeyEnv: settings.apiKeyEnv,
+      apiKeyDetected: Boolean(modelSecret.value),
+      apiKeySource: modelSecret.source,
+      apiKeyPreview: redactSecret(modelSecret.value)
+    },
+    server: {
+      pid: process.pid,
+      node: process.version,
+      execPath: process.execPath,
+      platform: `${process.platform}/${process.arch}`,
+      startedAt: startedAt.toISOString(),
+      uptimeSeconds: Math.round(process.uptime())
+    },
+    paths: {
+      appRoot: projectRoot,
+      dataStore: store.getStorePath()
+    },
+    workspaceRoot: settings.workspaceRoot,
+    references: summarizeReferences()
+  };
+}
+
+function diagnosticsSnapshot() {
+  const settings = store.getSettings();
+  return {
+    ...healthSnapshot(),
+    counts: {
+      sessions: store.listSessions().length,
+      skills: store.listSkills().length,
+      enabledSkills: store.listSkills().filter((skill) => skill.enabled).length,
+      connectors: store.listConnectors().length,
+      tasks: store.listTasks().length,
+      approvals: store.listApprovals().length,
+      pendingApprovals: store.listApprovals().filter((approval) => approval.status === 'pending').length,
+      mcpServers: store.listMcpServers().length,
+      runningMcpServers: store.listMcpServers().filter((server) => server.status === 'running').length,
+      memories: store.listMemories().length,
+      activeRuns: runs.size
+    },
+    config: {
+      runtimeMode: settings.runtimeMode,
+      approvalMode: settings.approvalMode,
+      language: settings.language
+    }
+  };
+}
+
+function sendSse(res, event) {
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+async function handleRunEvents(req, res, runId) {
+  const run = runs.get(runId);
+  if (!run) {
+    sendJson(res, 404, { error: 'Run not found' });
+    return;
+  }
+
+  const session = store.getSession(run.sessionId);
+  if (!session) {
+    sendJson(res, 404, { error: 'Session not found' });
+    return;
+  }
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no'
+  });
+
+  let assistantContent = '';
+  const trace = [];
+  store.updateSession(session.id, { status: 'running' });
+
+  try {
+    for await (const event of runAgentTurn({
+      prompt: run.prompt,
+      session,
+      history: store.listMessages(session.id),
+      settings: store.getSettings(),
+      skills: store.listSkills(),
+      connectors: store.listConnectors(),
+      memories: store.listMemories()
+    })) {
+      if (event.type === 'assistant.delta') {
+        assistantContent += event.delta;
+      }
+      if (event.type === 'trace' || event.type === 'tool') {
+        trace.push({ ...event, id: randomUUID(), at: new Date().toISOString() });
+      }
+      sendSse(res, event);
+    }
+
+    if (assistantContent.trim()) {
+      store.addMessage({
+        sessionId: session.id,
+        role: 'assistant',
+        content: assistantContent,
+        trace
+      });
+    }
+    sendSse(res, { type: 'stored', sessionId: session.id });
+  } catch (error) {
+    store.updateSession(session.id, { status: 'idle' });
+    sendSse(res, { type: 'error', message: error.message });
+  } finally {
+    runs.delete(runId);
+    res.end();
+  }
+}
+
+async function handleApi(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const parts = url.pathname.split('/').filter(Boolean);
+
+  if (req.method === 'GET' && url.pathname === '/api/health') {
+    sendJson(res, 200, healthSnapshot());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/diagnostics') {
+    sendJson(res, 200, diagnosticsSnapshot());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/blueprint') {
+    sendJson(res, 200, referenceBlueprint);
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/settings') {
+    sendJson(res, 200, store.getSettings());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/search') {
+    sendJson(res, 200, store.search(url.searchParams.get('q') || ''));
+    return;
+  }
+
+  if (req.method === 'PATCH' && url.pathname === '/api/settings') {
+    const body = await parseJson(req);
+    sendJson(res, 200, store.updateSettings(body));
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/runtime/test-model') {
+    sendJson(res, 200, await testModelConnection(store.getSettings()));
+    return;
+  }
+
+  if (req.method === 'PATCH' && url.pathname === '/api/secrets/model-key') {
+    const body = await parseJson(req);
+    sendJson(res, 200, writeModelApiKey(body.apiKey));
+    return;
+  }
+
+  if (req.method === 'DELETE' && url.pathname === '/api/secrets/model-key') {
+    sendJson(res, 200, deleteModelApiKey());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/sessions') {
+    sendJson(res, 200, store.listSessions());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/sessions') {
+    const body = await parseJson(req);
+    sendJson(res, 201, store.createSession(body));
+    return;
+  }
+
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'messages') {
+    const session = store.getSession(parts[2]);
+    if (!session) {
+      sendJson(res, 404, { error: 'Session not found' });
+      return;
+    }
+    sendJson(res, 200, store.listMessages(parts[2]));
+    return;
+  }
+
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'export') {
+    const session = store.getSession(parts[2]);
+    if (!session) {
+      sendJson(res, 404, { error: 'Session not found' });
+      return;
+    }
+    const messages = store.listMessages(parts[2]);
+    const format = url.searchParams.get('format') || 'markdown';
+    if (format === 'json') {
+      sendJson(res, 200, exportSessionJson(session, messages));
+      return;
+    }
+    const markdown = exportSessionMarkdown(session, messages);
+    res.writeHead(200, {
+      'content-type': 'text/markdown; charset=utf-8',
+      'content-disposition': `attachment; filename="${session.id}.md"`
+    });
+    res.end(markdown);
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/runs') {
+    const body = await parseJson(req);
+    const session = store.getSession(body.sessionId);
+    const prompt = String(body.prompt || '').trim();
+    if (!session) {
+      sendJson(res, 404, { error: 'Session not found' });
+      return;
+    }
+    if (!prompt) {
+      sendJson(res, 400, { error: 'Prompt is required' });
+      return;
+    }
+    store.addMessage({ sessionId: session.id, role: 'user', content: prompt });
+    const run = {
+      id: randomUUID(),
+      sessionId: session.id,
+      prompt,
+      createdAt: new Date().toISOString()
+    };
+    runs.set(run.id, run);
+    sendJson(res, 201, { runId: run.id });
+    return;
+  }
+
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'runs' && parts[3] === 'events') {
+    await handleRunEvents(req, res, parts[2]);
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/skills') {
+    sendJson(res, 200, store.listSkills());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/skills/install') {
+    const body = await parseJson(req);
+    sendJson(res, 201, installSkillFromWorkspace({ store, settings: store.getSettings(), payload: body }));
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/skills/upload') {
+    try {
+      const formData = await req.formData();
+      const file = formData.get('file');
+      const name = formData.get('name');
+
+      if (!file || !(file instanceof File)) {
+        sendJson(res, 400, { error: '未找到上传文件' });
+        return;
+      }
+
+      const settings = store.getSettings();
+      const tempDir = path.join(settings.workspaceRoot, '.skill-uploads');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ext = path.extname(file.name).toLowerCase();
+      const buffer = Buffer.from(await file.arrayBuffer());
+      let skillRoot = '';
+
+      if (ext === '.zip') {
+        // Extract zip to temp directory
+        const zipFileName = `${randomUUID()}`;
+        const extractDir = path.join(tempDir, zipFileName);
+        fs.mkdirSync(extractDir, { recursive: true });
+
+        const zip = await JSZip.loadAsync(buffer);
+        const entries = Object.values(zip.files);
+        await Promise.all(entries.map(async (entry) => {
+          const entryPath = path.join(extractDir, entry.name);
+          if (entry.dir) {
+            fs.mkdirSync(entryPath, { recursive: true });
+          } else {
+            fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+            const content = await entry.async('nodebuffer');
+            fs.writeFileSync(entryPath, content);
+          }
+        }));
+        skillRoot = extractDir;
+      } else {
+        // Single file: save directly
+        const tempFileName = `${randomUUID()}${ext}`;
+        const tempFilePath = path.join(tempDir, tempFileName);
+        fs.writeFileSync(tempFilePath, buffer);
+        skillRoot = tempFilePath;
+      }
+
+      const payload = { path: skillRoot };
+      if (name) payload.name = name;
+
+      const skill = installSkillFromWorkspace({ store, settings, payload });
+
+      // Clean up temp files after installation
+      try {
+        if (ext === '.zip') {
+          fs.rmSync(skillRoot, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(skillRoot);
+        }
+        const dirFiles = fs.readdirSync(tempDir);
+        if (dirFiles.length === 0) fs.rmdirSync(tempDir);
+      } catch { /* ignore cleanup errors */ }
+
+      sendJson(res, 201, skill);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/skills/runs') {
+    sendJson(res, 200, store.listSkillRuns(url.searchParams.get('skillId')));
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/skills/evolutions') {
+    const skillId = url.searchParams.get('skillId');
+    sendJson(res, 200, store.listEvolutionEntries(skillId));
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/skills/evolve') {
+    try {
+      const body = await parseJson(req);
+      const { skillId, trigger, result, userFeedback, newWorkflow } = body;
+
+      if (!skillId) {
+        sendJson(res, 400, { error: 'skillId required' });
+        return;
+      }
+
+      const skillRun = result ? { skillId, ...result } : null;
+      const evolution = new SkillEvolution(store);
+      const suggestion = evolution.evaluate(skillRun, { userFeedback, newWorkflow });
+
+      if (!suggestion) {
+        sendJson(res, 200, { evolved: false, message: 'No evolution needed' });
+        return;
+      }
+
+      // Apply evolution automatically
+      const applied = await evolution.evolve(skillId, suggestion);
+      sendJson(res, 200, { evolved: true, suggestion, applied });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/skills/parse') {
+    try {
+      const body = await parseJson(req);
+      const { content } = body;
+      if (!content) {
+        sendJson(res, 400, { error: 'content required' });
+        return;
+      }
+      const parsed = parseSkillMarkdown(content);
+      sendJson(res, 200, parsed);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'toggle') {
+    const skill = store.toggleSkill(parts[2]);
+    if (!skill) {
+      sendJson(res, 404, { error: 'Skill not found' });
+      return;
+    }
+    sendJson(res, 200, skill);
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'run') {
+    const body = await parseJson(req);
+    sendJson(
+      res,
+      200,
+      await runSkill({ store, settings: store.getSettings(), skillId: parts[2], input: body.input || {} })
+    );
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/connectors') {
+    sendJson(res, 200, store.listConnectors());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/mcp') {
+    sendJson(
+      res,
+      200,
+      store.listMcpServers().map((server) => ({
+        ...server,
+        runtime: mcpManager.snapshot(server.id)
+      }))
+    );
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/mcp') {
+    const body = await parseJson(req);
+    sendJson(res, 201, store.createMcpServer(body));
+    return;
+  }
+
+  if (req.method === 'PATCH' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 3) {
+    const body = await parseJson(req);
+    const server = store.updateMcpServer(parts[2], body);
+    if (!server) {
+      sendJson(res, 404, { error: 'MCP server not found' });
+      return;
+    }
+    sendJson(res, 200, server);
+    return;
+  }
+
+  if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 3) {
+    mcpManager.stop(parts[2]);
+    const server = store.removeMcpServer(parts[2]);
+    if (!server) {
+      sendJson(res, 404, { error: 'MCP server not found' });
+      return;
+    }
+    sendJson(res, 200, server);
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'mcp' && parts[3] === 'start') {
+    try {
+      const result = await mcpManager.start(parts[2]);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'mcp' && parts[3] === 'stop') {
+    sendJson(res, 200, mcpManager.stop(parts[2]));
+    return;
+  }
+
+  // GET /api/mcp/:id/tools - List discovered tools
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'mcp' && parts[3] === 'tools') {
+    const tools = mcpManager.getTools(parts[2]);
+    sendJson(res, 200, { tools });
+    return;
+  }
+
+  // POST /api/mcp/:id/call - Call a tool
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'mcp' && parts[3] === 'call') {
+    const body = await parseJson(req);
+    try {
+      const result = await mcpManager.callTool(parts[2], body.name, body.args || {});
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/mcp/:id/discover - Rediscover tools
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'mcp' && parts[3] === 'discover') {
+    try {
+      const tools = await mcpManager.rediscoverTools(parts[2]);
+      sendJson(res, 200, { tools });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/tasks') {
+    sendJson(res, 200, store.listTasks());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/approvals') {
+    sendJson(res, 200, store.listApprovals());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/approvals/request') {
+    const body = await parseJson(req);
+    if (body.kind === 'command') {
+      const validation = validateReadOnlyCommand(body.command);
+      if (!validation.allowed) {
+        sendJson(res, 400, { error: validation.reason });
+        return;
+      }
+      sendJson(
+        res,
+        201,
+        store.createApproval({
+          title: `执行命令: ${validation.sanitizedCommand}`,
+          detail: `工作区内只读执行，cwd=${body.cwd || '.'}`,
+          kind: 'command',
+          risk: 'medium',
+          payload: {
+            command: validation.sanitizedCommand,
+            cwd: body.cwd || '.'
+          }
+        })
+      );
+      return;
+    }
+    sendJson(res, 201, store.createApproval(body));
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'approvals' && parts[3] === 'decision') {
+    const body = await parseJson(req);
+    const approval = store.decideApproval(parts[2], body.decision);
+    if (!approval) {
+      sendJson(res, 404, { error: 'Approval not found' });
+      return;
+    }
+    sendJson(res, 200, approval);
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/tools/system/run') {
+    const body = await parseJson(req);
+    const approval = store.getApproval(body.approvalId);
+    if (!approval || approval.status !== 'approved' || approval.kind !== 'command') {
+      sendJson(res, 403, { error: '需要已批准的命令审批' });
+      return;
+    }
+    const result = await runReadOnlyCommand({
+      command: approval.payload.command,
+      cwd: approval.payload.cwd || '.',
+      workspaceRoot: store.getSettings().workspaceRoot
+    });
+    store.consumeApproval(approval.id, {
+      ok: result.ok,
+      exitCode: result.exitCode,
+      durationMs: result.durationMs
+    });
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/memories') {
+    sendJson(res, 200, store.listMemories());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/memories') {
+    const body = await parseJson(req);
+    sendJson(res, 201, store.createMemory(body));
+    return;
+  }
+
+  if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'memories' && parts.length === 3) {
+    const memory = store.deleteMemory(parts[2]);
+    if (!memory) {
+      sendJson(res, 404, { error: 'Memory not found' });
+      return;
+    }
+    sendJson(res, 200, memory);
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/workspace/list') {
+    sendJson(
+      res,
+      200,
+      listWorkspaceDirectory(store.getSettings().workspaceRoot, url.searchParams.get('path') || '.')
+    );
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/workspace/read') {
+    sendJson(
+      res,
+      200,
+      readWorkspaceFile(store.getSettings().workspaceRoot, url.searchParams.get('path'))
+    );
+    return;
+  }
+
+  notFound(res);
+}
+
+function createServer() {
+  return http.createServer(async (req, res) => {
+    try {
+      if (req.url.startsWith('/api/')) {
+        await handleApi(req, res);
+        return;
+      }
+      serveStatic(req, res);
+    } catch (error) {
+      sendJson(res, error.statusCode || 500, { error: error.message });
+    }
+  });
+}
+
+const args = parseArgs();
+
+if (args.doctor) {
+  console.log(JSON.stringify(healthSnapshot(), null, 2));
+  process.exit(0);
+}
+
+createServer().listen(args.port, '127.0.0.1', () => {
+  console.log(`AIAgent Client running at http://127.0.0.1:${args.port}`);
+});

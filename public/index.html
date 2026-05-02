@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Station Agent</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="/brand-mark.svg" alt="Station Agent" class="brand-mark" />
+          <div>
+            <div class="brand-name">Station</div>
+            <div class="brand-subtitle">Agent Console</div>
+          </div>
+        </div>
+
+        <button class="new-session" id="newSessionButton" type="button">新会话</button>
+
+        <nav class="nav-list" aria-label="主导航">
+            <button class="nav-item active" type="button" data-view="chat">指挥台</button>
+          <button class="nav-item" type="button" data-view="skills">技能</button>
+          <button class="nav-item" type="button" data-view="connectors">连接器</button>
+          <button class="nav-item" type="button" data-view="mcp">MCP</button>
+          <button class="nav-item" type="button" data-view="workspace">工作区</button>
+          <button class="nav-item" type="button" data-view="search">搜索</button>
+          <button class="nav-item" type="button" data-view="tasks">任务</button>
+          <button class="nav-item" type="button" data-view="security">安全</button>
+          <button class="nav-item" type="button" data-view="memory">记忆</button>
+          <button class="nav-item" type="button" data-view="settings">设置</button>
+        </nav>
+
+        <div class="sidebar-section">
+          <div class="section-label">会话</div>
+          <div class="session-list" id="sessionList"></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow" id="runtimeEyebrow">Runtime</div>
+            <h1 id="activeTitle">产品架构工作台</h1>
+          </div>
+          <div class="status-strip">
+            <span class="status-dot" id="healthDot"></span>
+            <span id="healthText">检查中</span>
+          </div>
+          <div class="top-actions">
+            <button id="exportSessionButton" type="button">导出会话</button>
+          </div>
+        </header>
+
+        <section class="workspace">
+          <section class="chat-column" id="viewChat">
+            <div class="message-feed" id="messageFeed"></div>
+            <form class="composer" id="composer">
+              <textarea id="promptInput" rows="3" placeholder="交给 Agent 的任务"></textarea>
+              <button id="sendButton" type="submit">发送</button>
+            </form>
+          </section>
+
+          <section class="view-panel hidden" id="viewSkills">
+            <div class="panel-header">
+              <h2>技能中心</h2>
+              <span id="skillCount"></span>
+            </div>
+            <div class="upload-zone" id="skillUploadZone">
+              <input type="file" id="skillFileInput" accept=".zip,.json,.md,.mjs,.py,.js,.ts" hidden />
+              <div class="upload-content">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M12 16V4m0 0L8 8m4-4l4 4M3 20h18"/>
+                </svg>
+                <span>拖放文件到这里，或</span>
+                <button type="button" id="skillFileSelectBtn">选择文件</button>
+              </div>
+              <div class="upload-file-name" id="skillFileName"></div>
+            </div>
+            <form class="inline-form" id="skillInstallForm">
+              <input name="path" placeholder="工作区路径（可选）" />
+              <input name="name" placeholder="可选名称" />
+              <button type="submit">安装</button>
+            </form>
+            <div class="grid-list" id="skillGrid"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewConnectors">
+            <div class="panel-header">
+              <h2>连接器</h2>
+              <span>Gateway Ready</span>
+            </div>
+            <div class="grid-list" id="connectorGrid"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewMcp">
+            <div class="panel-header">
+              <h2>MCP 服务</h2>
+              <span>Local Runtime</span>
+            </div>
+            <form class="settings-form compact-form" id="mcpForm">
+              <label>
+                <span>名称</span>
+                <input name="name" placeholder="本地 MCP 服务" />
+              </label>
+              <label>
+                <span>命令</span>
+                <input name="command" placeholder="node / npx / uvx / python3" />
+              </label>
+              <label>
+                <span>参数</span>
+                <input name="args" placeholder="server.mjs --stdio" />
+              </label>
+              <label>
+                <span>工作目录</span>
+                <input name="cwd" placeholder="默认工作区根目录" />
+              </label>
+              <div class="settings-actions">
+                <button type="submit">添加服务</button>
+              </div>
+            </form>
+            <div class="grid-list" id="mcpGrid"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewWorkspace">
+            <div class="panel-header">
+              <h2>工作区</h2>
+              <span id="workspacePathLabel">.</span>
+            </div>
+            <div class="workspace-browser">
+              <div class="file-list" id="workspaceList"></div>
+              <pre class="file-preview" id="workspacePreview">选择一个文本文件预览内容。</pre>
+            </div>
+          </section>
+
+          <section class="view-panel hidden" id="viewSearch">
+            <div class="panel-header">
+              <h2>会话搜索</h2>
+              <span id="searchStatus">Ready</span>
+            </div>
+            <form class="inline-form" id="searchForm">
+              <input id="searchInput" name="q" placeholder="搜索会话、消息、技能和记忆" />
+              <button type="submit">搜索</button>
+            </form>
+            <div class="search-results" id="searchResults"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewTasks">
+            <div class="panel-header">
+              <h2>任务编排</h2>
+              <span>Automation</span>
+            </div>
+            <div class="grid-list" id="taskGrid"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewSecurity">
+            <div class="panel-header">
+              <h2>安全策略</h2>
+              <span id="approvalModeLabel">ask</span>
+            </div>
+            <form class="inline-form" id="commandApprovalForm">
+              <input name="command" placeholder="只读命令，例如 ls -la" />
+              <input name="cwd" placeholder="工作区相对目录，默认 ." />
+              <button type="submit">申请执行</button>
+            </form>
+            <pre class="command-output" id="commandOutput">审批通过后可执行只读命令。</pre>
+            <div class="grid-list" id="approvalGrid"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewMemory">
+            <div class="panel-header">
+              <h2>长期记忆</h2>
+              <span id="memoryCount">0</span>
+            </div>
+            <form class="settings-form compact-form" id="memoryForm">
+              <label>
+                <span>标题</span>
+                <input name="title" placeholder="稳定偏好或项目知识" />
+              </label>
+              <label>
+                <span>标签</span>
+                <input name="tags" placeholder="product,safety" />
+              </label>
+              <label class="wide-field">
+                <span>内容</span>
+                <textarea name="content" rows="4" placeholder="写入长期可复用的上下文"></textarea>
+              </label>
+              <div class="settings-actions">
+                <button type="submit">保存记忆</button>
+              </div>
+            </form>
+            <div class="grid-list" id="memoryGrid"></div>
+          </section>
+
+          <section class="view-panel hidden" id="viewSettings">
+            <div class="panel-header">
+              <h2>运行设置</h2>
+              <span>OpenAI-compatible</span>
+            </div>
+            <form class="settings-form" id="settingsForm">
+              <label>
+                <span>工作区</span>
+                <input id="workspaceRootInput" name="workspaceRoot" />
+              </label>
+              <label>
+                <span>运行模式</span>
+                <select id="runtimeModeInput" name="runtimeMode">
+                  <option value="demo">demo</option>
+                  <option value="remote">remote</option>
+                </select>
+              </label>
+              <label>
+                <span>Base URL</span>
+                <input id="baseUrlInput" name="baseUrl" placeholder="https://api.openai.com/v1" />
+              </label>
+              <label>
+                <span>Model</span>
+                <input id="modelInput" name="model" />
+              </label>
+              <label>
+                <span>API Key Env</span>
+                <input id="apiKeyEnvInput" name="apiKeyEnv" />
+              </label>
+              <label>
+                <span>API Key</span>
+                <input id="apiKeyInput" name="apiKey" type="password" autocomplete="off" placeholder="保存到 macOS Keychain" />
+              </label>
+              <div class="settings-actions">
+                <button type="submit">保存设置</button>
+                <button type="button" id="testModelButton">测试模型</button>
+              </div>
+              <div class="settings-status" id="modelTestStatus">未测试</div>
+            </form>
+          </section>
+        </section>
+      </main>
+
+      <aside class="inspector">
+        <section class="inspector-section">
+          <div class="section-label">运行状态</div>
+          <div class="runtime-panel" id="runtimePanel"></div>
+        </section>
+
+        <section class="inspector-section">
+          <div class="section-label">Trace</div>
+          <div class="trace-list" id="traceList"></div>
+        </section>
+
+      </aside>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
