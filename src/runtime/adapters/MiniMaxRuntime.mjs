@@ -155,9 +155,26 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
         const payload = await response.json();
         const contentBlocks = payload?.content || [];
 
-        // Separate text and tool_use blocks
+        // Separate thinking, text and tool_use blocks
+        const thinkingBlocks = contentBlocks.filter((b) => b.type === 'thinking');
         const textBlocks = contentBlocks.filter((b) => b.type === 'text');
         const toolUseBlocks = contentBlocks.filter((b) => b.type === 'tool_use');
+
+        // Stream thinking content first
+        for (const thinkBlock of thinkingBlocks) {
+          yield { type: 'thinking', detail: thinkBlock.thinking || '' };
+          await wait(20);
+        }
+
+        // Record token usage if available
+        if (payload?.usage && context.recordUsage) {
+          context.recordUsage({
+            input_tokens: payload.usage.input_tokens,
+            output_tokens: payload.usage.output_tokens,
+            total_tokens: payload.usage.total_tokens,
+            model: settings.model
+          });
+        }
 
         // Stream text content first
         const textContent = textBlocks.map((b) => b.text).join('\n');

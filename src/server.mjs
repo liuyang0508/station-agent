@@ -19,6 +19,8 @@ import { runAgentTurn } from './runtime/agentRuntime.mjs';
 import { parseSkillMarkdown } from './lib/skillFormats.mjs';
 import { SkillEvolution } from './lib/skillEvolution.mjs';
 import { testModelConnection } from './runtime/modelRuntime.mjs';
+import { ContextCompactor, SubagentManager } from './runtime/sandboxExecutor.mjs';
+import { renderDiffAsText } from './lib/diffEngine.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +28,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const publicDir = path.join(projectRoot, 'public');
 const store = new JsonStore();
 const mcpManager = new McpManager({ store });
+const subagentManager = new SubagentManager({ store, settings: store.getSettings() });
 const runs = new Map();
 const startedAt = new Date();
 
@@ -196,6 +199,25 @@ async function handleRunEvents(req, res, runId) {
     return;
   }
 
+  const compactor = new ContextCompactor({ maxMessages: 40, maxTokens: 60000 });
+  let history = store.listMessages(session.id);
+  const { messages: compactedHistory, compacted } = compactor.compact(history);
+
+  // Collect MCP tools from running servers
+  const mcpTools = [];
+  for (const server of store.listMcpServers()) {
+    if (server.status === 'running') {
+      const serverTools = mcpManager.getTools(server.id);
+      for (const tool of serverTools) {
+        mcpTools.push({ name: tool.name, description: tool.description || '' });
+      }
+    }
+  }
+
+  const recordUsage = (usage) => {
+    store.addTokenUsage({ sessionId: session.id, ...usage });
+  };
+
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache, no-transform',
@@ -211,11 +233,13 @@ async function handleRunEvents(req, res, runId) {
     for await (const event of runAgentTurn({
       prompt: run.prompt,
       session,
-      history: store.listMessages(session.id),
+      history: compactedHistory,
       settings: store.getSettings(),
       skills: store.listSkills(),
       connectors: store.listConnectors(),
-      memories: store.listMemories()
+      memories: store.listMemories(),
+      mcpTools,
+      recordUsage
     })) {
       if (event.type === 'assistant.delta') {
         assistantContent += event.delta;
@@ -611,6 +635,37 @@ async function handleApi(req, res) {
     return;
   }
 
+  // Subagent routes
+  if (req.method === 'GET' && url.pathname === '/api/subagents') {
+    sendJson(res, 200, subagentManager.listActive());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/subagents') {
+    const body = await parseJson(req);
+    const subagent = subagentManager.spawn({
+      task: body.task,
+      parentSessionId: body.parentSessionId,
+      priority: body.priority || 'normal'
+    });
+    sendJson(res, 201, subagent);
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'subagents' && parts[3] === 'complete') {
+    const body = await parseJson(req);
+    subagentManager.complete(parts[2], body.result);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'subagents' && parts[3] === 'fail') {
+    const body = await parseJson(req);
+    subagentManager.fail(parts[2], body.error);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/tasks') {
     sendJson(res, 200, store.listTasks());
     return;
@@ -686,6 +741,28 @@ async function handleApi(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/token-usage') {
+    const window = store.listTokenUsage();
+    const dailyLimit = 100000;
+    const now = Date.now();
+    const windowStart = now - 24 * 60 * 60 * 1000;
+    const recent = window.filter(e => e.timestamp > windowStart);
+    const totals = recent.reduce((acc, e) => {
+      acc.input += e.inputTokens || 0;
+      acc.output += e.outputTokens || 0;
+      acc.total += e.totalTokens || 0;
+      return acc;
+    }, { input: 0, output: 0, total: 0 });
+    sendJson(res, 200, {
+      dailyLimit,
+      windowTokens: totals,
+      windowPercent: Math.round((totals.total / dailyLimit) * 100),
+      remaining: Math.max(0, dailyLimit - totals.total),
+      records: recent.slice(0, 50)
+    });
+    return;
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/memories') {
     const body = await parseJson(req);
     sendJson(res, 201, store.createMemory(body));
@@ -717,6 +794,26 @@ async function handleApi(req, res) {
       200,
       readWorkspaceFile(store.getSettings().workspaceRoot, url.searchParams.get('path'))
     );
+    return;
+  }
+
+  // Diff two file paths
+  if (req.method === 'POST' && url.pathname === '/api/diff') {
+    const body = await parseJson(req);
+    const { oldPath, newPath } = body;
+    if (!oldPath || !newPath) {
+      sendJson(res, 400, { error: 'oldPath and newPath required' });
+      return;
+    }
+    try {
+      const wsRoot = store.getSettings().workspaceRoot;
+      const oldContent = fs.readFileSync(path.resolve(wsRoot, oldPath), 'utf8');
+      const newContent = fs.readFileSync(path.resolve(wsRoot, newPath), 'utf8');
+      const result = renderDiffAsText(oldContent, newContent);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
     return;
   }
 

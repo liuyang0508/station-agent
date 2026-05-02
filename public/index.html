@@ -57,6 +57,7 @@
         <section class="workspace">
           <section class="chat-column" id="viewChat">
             <div class="message-feed" id="messageFeed"></div>
+            <div class="terminal-output" id="terminalOutput"></div>
             <form class="composer" id="composer">
               <textarea id="promptInput" rows="3" placeholder="交给 Agent 的任务"></textarea>
               <button id="sendButton" type="submit">发送</button>
@@ -233,6 +234,13 @@
               </div>
               <div class="settings-status" id="modelTestStatus">未测试</div>
             </form>
+            <div class="token-budget" id="tokenBudget">
+              <div class="token-budget-header">Token 预算（24h）</div>
+              <div class="token-budget-bar">
+                <div class="token-budget-fill" id="tokenBudgetFill"></div>
+              </div>
+              <div class="token-budget-stats" id="tokenBudgetStats">加载中...</div>
+            </div>
           </section>
         </section>
       </main>
@@ -246,6 +254,11 @@
         <section class="inspector-section">
           <div class="section-label">Trace</div>
           <div class="trace-list" id="traceList"></div>
+        </section>
+
+        <section class="inspector-section">
+          <div class="section-label">思考过程</div>
+          <div class="thinking-panel" id="thinkingContent"></div>
         </section>
 
       </aside>

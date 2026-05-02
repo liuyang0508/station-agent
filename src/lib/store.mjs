@@ -161,7 +161,8 @@ function createDefaultState() {
         updatedAt: now()
       }
     ],
-    skillRuns: []
+    skillRuns: [],
+    tokenUsage: []
   };
 }
 
@@ -222,6 +223,10 @@ export class JsonStore {
     }
     if (!Array.isArray(state.approvals)) {
       state.approvals = defaults.approvals;
+      changed = true;
+    }
+    if (!Array.isArray(state.tokenUsage)) {
+      state.tokenUsage = defaults.tokenUsage;
       changed = true;
     }
     if (changed) {
@@ -536,6 +541,26 @@ export class JsonStore {
     const [memory] = this.state.memories.splice(index, 1);
     this.save();
     return memory;
+  }
+
+  addTokenUsage(entry) {
+    const usage = {
+      id: randomUUID(),
+      sessionId: entry.sessionId || null,
+      inputTokens: entry.inputTokens || 0,
+      outputTokens: entry.outputTokens || 0,
+      totalTokens: entry.totalTokens || (entry.inputTokens || 0) + (entry.outputTokens || 0),
+      model: entry.model || 'unknown',
+      timestamp: entry.timestamp || Date.now()
+    };
+    this.state.tokenUsage.unshift(usage);
+    this.state.tokenUsage = this.state.tokenUsage.slice(0, 1000);
+    this.save();
+    return usage;
+  }
+
+  listTokenUsage() {
+    return this.state.tokenUsage;
   }
 
   search(query) {

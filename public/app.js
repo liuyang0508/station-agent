@@ -509,6 +509,27 @@ function renderSettings() {
   $('#apiKeyEnvInput').value = state.settings?.apiKeyEnv || 'AIAGENT_API_KEY';
   $('#apiKeyInput').value = '';
   $('#modelTestStatus').textContent = state.modelTestStatus;
+  renderTokenBudget();
+}
+
+async function renderTokenBudget() {
+  try {
+    const data = await api('/api/token-usage');
+    const fill = $('#tokenBudgetFill');
+    const stats = $('#tokenBudgetStats');
+    if (!fill || !stats) return;
+    const pct = data.windowPercent || 0;
+    fill.style.width = `${Math.min(pct, 100)}%`;
+    fill.classList.remove('warning', 'danger');
+    if (pct > 80) fill.classList.add('danger');
+    else if (pct > 50) fill.classList.add('warning');
+    const used = data.windowTokens?.total || 0;
+    const limit = data.dailyLimit || 100000;
+    stats.textContent = `已用 ${used.toLocaleString()} / ${limit.toLocaleString()} (${pct}%) · 剩余 ${data.remaining?.toLocaleString() || 0}`;
+  } catch {
+    const stats = $('#tokenBudgetStats');
+    if (stats) stats.textContent = '无法加载用量数据';
+  }
 }
 
 function renderViews() {
@@ -569,9 +590,12 @@ function appendAssistantDelta(delta) {
   renderMessages();
 }
 
+let thinkingContent = '';
+
 async function sendPrompt(prompt) {
   state.sending = true;
   state.trace = [];
+  thinkingContent = '';
   state.messages.push({
     id: `local-${Date.now()}`,
     role: 'user',
@@ -590,11 +614,21 @@ async function sendPrompt(prompt) {
     const event = JSON.parse(message.data);
     if (event.type === 'assistant.delta') {
       appendAssistantDelta(event.delta);
+    } else if (event.type === 'thinking') {
+      thinkingContent += event.detail;
+      const thinkEl = $('#thinkingContent');
+      if (thinkEl) {
+        thinkEl.textContent = thinkingContent;
+        thinkEl.classList.toggle('visible', thinkingContent.length > 0);
+      }
     } else if (event.type === 'trace' || event.type === 'tool') {
       state.trace.push(event);
       renderTrace();
     } else if (event.type === 'stored') {
       events.close();
+      thinkingContent = '';
+      const thinkEl = $('#thinkingContent');
+      if (thinkEl) thinkEl.classList.remove('visible');
       state.messages = await api(`/api/sessions/${state.activeSessionId}/messages`);
       state.sessions = await api('/api/sessions');
       state.health = await api('/api/health');
@@ -605,6 +639,10 @@ async function sendPrompt(prompt) {
       state.sending = false;
       state.trace.push({ title: '运行失败', detail: event.message, status: 'error' });
       render();
+    } else if (event.type === 'terminal') {
+      state.commandOutput = (state.commandOutput || '') + event.delta;
+      $('#terminalOutput').textContent = state.commandOutput;
+      $('#terminalOutput').classList.add('active');
     }
   };
 

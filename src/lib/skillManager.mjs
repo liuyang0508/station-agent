@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runReadOnlyCommand } from './commandRunner.mjs';
 import { validateWorkspacePath } from './safety.mjs';
+import { SandboxExecutor } from '../runtime/sandboxExecutor.mjs';
 
 function readJsonIfExists(filePath) {
   if (!fs.existsSync(filePath)) return null;
@@ -113,7 +114,7 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
     throw new Error('技能未启用');
   }
 
-  if (!skill.command) {
+  if (!skill.command && !skill.entrypoint) {
     const output = [
       `技能 ${skill.name} 已完成一次本地编排检查。`,
       `入口: ${skill.entrypoint || '未配置'}`,
@@ -122,6 +123,29 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
     return store.recordSkillRun({ skillId, status: 'completed', input, output });
   }
 
+  // Sandbox execution for JS/Python scripts
+  const executor = new SandboxExecutor({ timeoutMs: 30000 });
+  const ext = skill.entrypoint ? path.extname(skill.entrypoint) : '';
+  const language = ext === '.py' ? 'python' : ext === '.mjs' || ext === '.js' ? 'javascript' : null;
+
+  if (language) {
+    const code = fs.readFileSync(skill.entrypoint, 'utf8');
+    const sandboxContext = {
+      input: JSON.stringify(input),
+      workspaceRoot: settings.workspaceRoot,
+      skillName: skill.name
+    };
+    const result = await executor.execute(code, language, sandboxContext);
+    return store.recordSkillRun({
+      skillId,
+      status: result.ok ? 'completed' : 'failed',
+      input,
+      output: result.stdout,
+      error: result.stderr || (result.ok ? '' : result.error)
+    });
+  }
+
+  // Shell command fallback
   const command = [skill.command, ...(skill.args || [])].join(' ');
   const result = await runReadOnlyCommand({
     command,

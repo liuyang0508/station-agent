@@ -46,7 +46,7 @@ function shouldListWorkspace(prompt) {
   return /工作区|目录|文件|workspace|list files/i.test(prompt);
 }
 
-export function createAgentRuntime(settings, { skills, memories, tools }) {
+export function createAgentRuntime(settings, { skills, memories, tools, mcpTools = [] }) {
   const runtimeMode = settings.runtimeMode || 'demo';
   const baseUrl = (settings.baseUrl || '').replace(/\/+$/, '');
 
@@ -79,8 +79,8 @@ export function createAgentRuntime(settings, { skills, memories, tools }) {
 }
 
 export async function* runAgentTurn(context) {
-  const { prompt, session, history, settings, skills, connectors, memories = [] } = context;
-  const tools = createToolRegistry({ settings });
+  const { prompt, session, history, settings, skills, connectors, memories = [], mcpTools = [] } = context;
+  const tools = createToolRegistry({ settings, mcpTools });
 
   // Add tools to context for adapters
   const runtimeContext = { ...context, tools };
@@ -101,7 +101,7 @@ export async function* runAgentTurn(context) {
   }
 
   // Create and run the appropriate runtime
-  const runtime = createAgentRuntime(settings, { skills, memories, tools });
+  const runtime = createAgentRuntime(settings, { skills, memories, tools, mcpTools });
 
   yield {
     type: 'trace',

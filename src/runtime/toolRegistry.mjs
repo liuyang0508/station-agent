@@ -37,7 +37,7 @@ function safeReadFile(workspaceRoot, relativePath, maxBytes = 512 * 1024) {
   };
 }
 
-export function createToolRegistry({ settings }) {
+export function createToolRegistry({ settings, mcpTools = [] }) {
   const tools = new Map();
 
   tools.set('workspace.list', {
@@ -194,6 +194,18 @@ export function createToolRegistry({ settings }) {
       return { matches: results, base: resolved.relativePath };
     }
   });
+
+  // Register MCP tools
+  for (const tool of mcpTools) {
+    if (!tools.has(tool.name)) {
+      tools.set(tool.name, {
+        name: tool.name,
+        description: tool.description || 'MCP tool',
+        params: { type: 'object', properties: {} },
+        run: () => ({ error: 'MCP tool must be called via MCP manager' })
+      });
+    }
+  }
 
   return {
     list() {
