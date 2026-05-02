@@ -15,7 +15,7 @@ function chunkText(text, size = 72) {
   return chunks;
 }
 
-function buildSystemPrompt({ skills, memories = [] }) {
+function buildSystemPrompt({ skills, memories = [], tools = [] }) {
   const enabledSkills = skills
     .filter((skill) => skill.enabled)
     .map((skill) => `${skill.name}: ${skill.description}`)
@@ -24,14 +24,28 @@ function buildSystemPrompt({ skills, memories = [] }) {
     .slice(0, 8)
     .map((memory) => `${memory.title}: ${memory.content}`)
     .join('\n');
+  const toolDescriptions = tools
+    .map((tool) => `  - ${tool.name}: ${tool.description}`)
+    .join('\n');
   return [
     '你是 Station Agent 的本地 Agent Runtime。',
     '你必须用中文优先回答，表达要专业、直接、可执行。',
     '你运行在一个本地优先客户端中，所有文件和命令动作都必须遵守工作区边界和审批策略。',
     '当任务复杂时，先给出可执行计划，再推进到交付物、命令或代码变更。',
+    toolDescriptions ? `可用工具:\n${toolDescriptions}` : null,
     `可用技能:\n${enabledSkills || '暂无启用技能。'}`,
     `长期记忆:\n${memoryContext || '暂无长期记忆。'}`,
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function buildToolResultMessage(toolName, toolArgs, result) {
+  const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+  return {
+    role: 'user',
+    content: `工具结果: ${toolName}\n参数: ${JSON.stringify(toolArgs)}\n输出:\n${resultStr.slice(0, 4000)}`
+  };
 }
 
 export class MiniMaxRuntime extends AgentRuntimeAdapter {
@@ -91,59 +105,149 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
       return;
     }
 
-    yield { type: 'trace', title: '模型运行时', detail: `调用 MiniMax / ${settings.model}`, status: 'running' };
+    const toolList = tools.list ? tools.list() : [];
+    yield { type: 'trace', title: '模型运行时', detail: `调用 MiniMax / ${settings.model}，可用工具 ${toolList.length} 个`, status: 'running' };
 
-    try {
-      const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+    const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+    const MAX_TURN_LOOPS = 10;
+    let turnCount = 0;
 
-      // Build messages in Anthropic format
-      const messages = [
-        { role: 'user', content: buildSystemPrompt({ skills, memories }) },
-        ...history.slice(-12).map((message) => ({
-          role: message.role === 'assistant' ? 'assistant' : 'user',
-          content: message.content
-        })),
-        { role: 'user', content: prompt }
-      ];
+    const systemMessage = {
+      role: 'user',
+      content: buildSystemPrompt({ skills, memories, tools: toolList })
+    };
 
-      const response = await fetch(`${baseUrl}/messages`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'authorization': `Bearer ${apiKey}`,
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: settings.model || 'MiniMax-M2.7',
-          max_tokens: 4096,
-          messages
-        })
-      });
+    const conversationMessages = [
+      systemMessage,
+      ...history.slice(-12).map((message) => ({
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: message.content
+      })),
+      { role: 'user', content: prompt }
+    ];
 
-      if (!response.ok) {
-        const detail = await response.text();
-        yield { type: 'trace', title: '模型运行时', detail: `HTTP ${response.status} ${detail.slice(0, 300)}`, status: 'error' };
-        yield { type: 'done', detail: '运行完成（模型调用失败）' };
+    while (turnCount < MAX_TURN_LOOPS) {
+      turnCount++;
+
+      try {
+        const response = await fetch(`${baseUrl}/messages`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'authorization': `Bearer ${apiKey}`,
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: settings.model || 'MiniMax-M2.7',
+            max_tokens: 4096,
+            messages: conversationMessages
+          })
+        });
+
+        if (!response.ok) {
+          const detail = await response.text();
+          yield { type: 'trace', title: '模型运行时', detail: `HTTP ${response.status} ${detail.slice(0, 300)}`, status: 'error' };
+          yield { type: 'done', detail: '运行完成（模型调用失败）' };
+          return;
+        }
+
+        const payload = await response.json();
+        const contentBlocks = payload?.content || [];
+
+        // Separate text and tool_use blocks
+        const textBlocks = contentBlocks.filter((b) => b.type === 'text');
+        const toolUseBlocks = contentBlocks.filter((b) => b.type === 'tool_use');
+
+        // Stream text content first
+        const textContent = textBlocks.map((b) => b.text).join('\n');
+        if (textContent) {
+          yield { type: 'trace', title: '输出生成', detail: '开始向客户端流式返回结果。', status: 'running' };
+          for (const delta of chunkText(textContent)) {
+            yield { type: 'assistant.delta', delta };
+            await wait(28);
+          }
+        }
+
+        // Handle tool calls
+        if (toolUseBlocks.length > 0) {
+          for (const toolBlock of toolUseBlocks) {
+            const toolName = toolBlock.name;
+            const toolInput = toolBlock.input || {};
+            const toolId = toolBlock.id;
+
+            yield {
+              type: 'tool',
+              tool: toolName,
+              status: 'running',
+              detail: `正在执行 ${toolName}...`
+            };
+
+            try {
+              let result;
+              if (tools.has(toolName)) {
+                result = tools.run(toolName, toolInput);
+              } else {
+                result = { error: `Unknown tool: ${toolName}` };
+              }
+
+              yield {
+                type: 'tool',
+                tool: toolName,
+                status: 'ok',
+                detail: typeof result === 'object' ? JSON.stringify(result).slice(0, 200) : String(result)
+              };
+
+              conversationMessages.push({
+                role: 'user',
+                content: `工具 "${toolName}" (id: ${toolId}) 执行完成，结果：${JSON.stringify(result).slice(0, 3000)}`
+              });
+            } catch (error) {
+              yield {
+                type: 'tool',
+                tool: toolName,
+                status: 'error',
+                detail: error.message
+              };
+              conversationMessages.push({
+                role: 'user',
+                content: `工具 "${toolName}" (id: ${toolId}) 执行失败：${error.message}`
+              });
+            }
+          }
+
+          // Continue the loop - add a continuation prompt
+          conversationMessages.push({
+            role: 'user',
+            content: '继续。请基于工具执行结果完成回答，或继续调用工具。'
+          });
+
+          yield {
+            type: 'trace',
+            title: '工具循环',
+            detail: `已执行 ${toolUseBlocks.length} 个工具调用，继续推理...`,
+            status: 'running'
+          };
+          await wait(160);
+          continue;
+        }
+
+        // No tool calls - we're done
+        yield { type: 'done', detail: '运行完成' };
+        return;
+      } catch (error) {
+        yield { type: 'trace', title: '模型运行时', detail: error.message, status: 'error' };
+        yield { type: 'done', detail: '运行完成（异常）' };
         return;
       }
-
-      const payload = await response.json();
-      // Extract text content - skip thinking blocks, find first text block
-      const textBlock = payload?.content?.find((block) => block.type === 'text');
-      const answer = textBlock?.text || '';
-
-      yield { type: 'trace', title: '输出生成', detail: '开始向客户端流式返回结果。', status: 'running' };
-
-      for (const delta of chunkText(answer)) {
-        yield { type: 'assistant.delta', delta };
-        await wait(28);
-      }
-
-      yield { type: 'done', detail: '运行完成' };
-    } catch (error) {
-      yield { type: 'trace', title: '模型运行时', detail: error.message, status: 'error' };
-      yield { type: 'done', detail: '运行完成（异常）' };
     }
+
+    yield {
+      type: 'trace',
+      title: '工具循环',
+      detail: `已达到最大循环次数（${MAX_TURN_LOOPS}），强制结束`,
+      status: 'warn'
+    };
+    yield { type: 'done', detail: '运行完成（达到最大循环次数）' };
   }
 }
