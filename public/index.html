@@ -54,6 +54,8 @@
           </div>
         </header>
 
+        <div class="tab-bar" id="tabBar"></div>
+
         <section class="workspace">
           <section class="chat-column" id="viewChat">
             <div class="message-feed" id="messageFeed"></div>
@@ -241,6 +243,21 @@
               </div>
               <div class="token-budget-stats" id="tokenBudgetStats">加载中...</div>
             </div>
+
+            <div class="settings-section">
+              <div class="settings-section-header">备份与同步</div>
+              <div class="backup-actions">
+                <button type="button" id="exportSettingsBtn" class="backup-btn">导出设置</button>
+                <button type="button" id="importSettingsBtn" class="backup-btn secondary">导入设置</button>
+                <button type="button" id="cloudBackupBtn" class="backup-btn secondary">云端备份</button>
+              </div>
+              <div class="cloud-backup-form hidden" id="cloudBackupForm">
+                <input type="text" id="cloudEndpointInput" placeholder="https://your-api.com/backup" />
+                <input type="password" id="cloudApiKeyInput" placeholder="可选 API Key" />
+                <button type="button" id="cloudBackupConfirmBtn">确认备份</button>
+              </div>
+            </div>
+            <input type="file" id="settingsImportInput" accept=".json" hidden />
           </section>
         </section>
       </main>
@@ -265,5 +282,14 @@
     </div>
 
     <script type="module" src="/app.js"></script>
+
+    <div class="command-palette-overlay" id="commandPalette">
+      <div class="palette-backdrop"></div>
+      <div class="palette-dialog">
+        <input class="palette-input" id="paletteInput" type="text"
+               placeholder="搜索命令、会话、技能..." autocomplete="off" />
+        <div class="palette-results" id="paletteResults"></div>
+      </div>
+    </div>
   </body>
 </html>

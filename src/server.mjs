@@ -21,6 +21,8 @@ import { SkillEvolution } from './lib/skillEvolution.mjs';
 import { testModelConnection } from './runtime/modelRuntime.mjs';
 import { ContextCompactor, SubagentManager } from './runtime/sandboxExecutor.mjs';
 import { renderDiffAsText } from './lib/diffEngine.mjs';
+import { WorkflowEngine, parseAgentWorkflow } from './runtime/workflowEngine.mjs';
+import { createToolRegistry } from './runtime/toolRegistry.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -814,6 +816,164 @@ async function handleApi(req, res) {
     } catch (error) {
       sendJson(res, 400, { error: error.message });
     }
+    return;
+  }
+
+  // GET /api/settings/sync - Export current settings for backup
+  if (req.method === 'GET' && url.pathname === '/api/settings/sync') {
+    const settings = store.getSettings();
+    const exportData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings,
+      skills: store.listSkills(),
+      memories: store.listMemories(),
+      mcpServers: store.listMcpServers().map(s => ({ ...s, env: {} })),
+      approvals: store.listApprovals()
+    };
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': 'attachment; filename="station-agent-backup.json"'
+    });
+    res.end(JSON.stringify(exportData, null, 2));
+    return;
+  }
+
+  // POST /api/settings/sync - Import settings from backup
+  if (req.method === 'POST' && url.pathname === '/api/settings/sync') {
+    try {
+      const body = await parseJson(req);
+      const { version, settings, skills, memories, mcpServers } = body;
+      if (!version || !settings) {
+        sendJson(res, 400, { error: 'Invalid backup format' });
+        return;
+      }
+      store.updateSettings(settings);
+      if (Array.isArray(skills)) {
+        const existing = store.listSkills();
+        for (const skill of skills) {
+          if (!existing.find(s => s.name === skill.name)) {
+            try { store.installSkill(skill); } catch { /* skip dup */ }
+          }
+        }
+      }
+      if (Array.isArray(memories)) {
+        const existing = store.listMemories();
+        for (const mem of memories) {
+          if (!existing.find(m => m.title === mem.title)) {
+            try { store.createMemory({ title: mem.title, content: mem.content, tags: mem.tags, source: 'imported' }); } catch { /* skip dup */ }
+          }
+        }
+      }
+      if (Array.isArray(mcpServers)) {
+        const existing = store.listMcpServers();
+        for (const srv of mcpServers) {
+          if (!existing.find(s => s.name === srv.name)) {
+            try { store.createMcpServer({ name: srv.name, command: srv.command, args: srv.args, cwd: srv.cwd, enabled: false }); } catch { /* skip dup */ }
+          }
+        }
+      }
+      sendJson(res, 200, { ok: true, message: '设置已从备份恢复' });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/settings/cloud-backup - Push to user-provided cloud endpoint
+  if (req.method === 'POST' && url.pathname === '/api/settings/cloud-backup') {
+    try {
+      const body = await parseJson(req);
+      const { endpoint, apiKey } = body;
+      if (!endpoint) {
+        sendJson(res, 400, { error: 'endpoint is required' });
+        return;
+      }
+      const backupData = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        settings: store.getSettings(),
+        skills: store.listSkills(),
+        memories: store.listMemories()
+      };
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(apiKey ? { 'authorization': `Bearer ${apiKey}` } : {})
+        },
+        body: JSON.stringify(backupData)
+      });
+      if (!response.ok) throw new Error(`Cloud backup failed: ${response.statusText}`);
+      sendJson(res, 200, { ok: true, message: '已备份到云端' });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // Model configs CRUD
+  if (req.method === 'GET' && url.pathname === '/api/models') {
+    sendJson(res, 200, store.listModelConfigs());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/models') {
+    const body = await parseJson(req);
+    sendJson(res, 201, store.upsertModelConfig(body));
+    return;
+  }
+
+  if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'models' && parts.length === 3) {
+    const removed = store.removeModelConfig(parts[2]);
+    if (!removed) {
+      sendJson(res, 404, { error: 'Model config not found' });
+      return;
+    }
+    sendJson(res, 200, removed);
+    return;
+  }
+
+  // Workflow execution from AGENT.md definition
+  if (req.method === 'POST' && url.pathname === '/api/workflow/run') {
+    const body = await parseJson(req);
+    const { skillId, input = {} } = body;
+    if (!skillId) {
+      sendJson(res, 400, { error: 'skillId required' });
+      return;
+    }
+
+    const skill = store.listSkills().find(s => s.id === skillId);
+    if (!skill) {
+      sendJson(res, 404, { error: 'Skill not found' });
+      return;
+    }
+
+    // Parse agent.md metadata from skill
+    const parsed = parseAgentMarkdown(skill.metadata?.raw || '');
+    if (!parsed.capabilities || parsed.capabilities.length === 0) {
+      sendJson(res, 400, { error: 'Skill has no AGENT.md workflow definition' });
+      return;
+    }
+
+    const workflowDef = parseAgentWorkflow(parsed);
+    const engine = new WorkflowEngine({ maxParallel: 3 });
+    const settings = store.getSettings();
+    const tools = createToolRegistry({ settings });
+
+    // Execute workflow and stream steps
+    const steps = engine.buildWorkflow(workflowDef, { input, skill });
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive'
+    });
+
+    for await (const event of engine.execute(steps, { input }, tools)) {
+      sendSse(res, event);
+    }
+
+    res.end();
     return;
   }
 

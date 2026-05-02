@@ -20,7 +20,11 @@ const state = {
   activeSessionId: null,
   activeView: 'chat',
   trace: [],
-  sending: false
+  sending: false,
+  tabs: [],           // array of {id, sessionId, title}
+  activeTabIndex: 0,
+  commandPaletteOpen: false,
+  sidebarVisible: true
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -878,17 +882,383 @@ function bindEvents() {
     }
     render();
   });
+
+  // Settings backup handlers
+  $('#exportSettingsBtn')?.addEventListener('click', async () => {
+    const response = await fetch('/api/settings/sync');
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'station-agent-backup.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  $('#importSettingsBtn')?.addEventListener('click', () => {
+    $('#settingsImportInput').click();
+  });
+
+  $('#settingsImportInput')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const data = JSON.parse(text);
+      const response = await api('/api/settings/sync', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      });
+      alert(response.message || '导入成功');
+      state.health = await api('/api/health');
+      render();
+    } catch (err) {
+      alert('导入失败: ' + err.message);
+    }
+    e.target.value = '';
+  });
+
+  $('#cloudBackupBtn')?.addEventListener('click', () => {
+    const form = $('#cloudBackupForm');
+    if (form) form.classList.toggle('hidden');
+  });
+
+  $('#cloudBackupConfirmBtn')?.addEventListener('click', async () => {
+    const endpoint = $('#cloudEndpointInput')?.value?.trim();
+    if (!endpoint) { alert('请输入云端备份地址'); return; }
+    const apiKey = $('#cloudApiKeyInput')?.value?.trim();
+    try {
+      const result = await api('/api/settings/cloud-backup', {
+        method: 'POST',
+        body: JSON.stringify({ endpoint, apiKey })
+      });
+      alert(result.message || '备份成功');
+      $('#cloudBackupForm')?.classList.add('hidden');
+    } catch (err) {
+      alert('备份失败: ' + err.message);
+    }
+  });
+
+  // ── Keyboard Shortcuts ──
+  document.addEventListener('keydown', (event) => {
+    const mod = event.metaKey || event.ctrlKey;
+    if (!mod) return;
+
+    if (event.key === 'k' || event.key === 'K') {
+      // Cmd+K: toggle command palette
+      event.preventDefault();
+      toggleCommandPalette();
+    } else if (event.key === 't' || event.key === 'T') {
+      // Cmd+T: new session
+      event.preventDefault();
+      newSession();
+    } else if (event.key === 'w' || event.key === 'W') {
+      // Cmd+W: close current tab
+      event.preventDefault();
+      closeActiveTab();
+    } else if (event.key === '1' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(0);
+    } else if (event.key === '2' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(1);
+    } else if (event.key === '3' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(2);
+    } else if (event.key === '4' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(3);
+    } else if (event.key === '5' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(4);
+    } else if (event.key === '6' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(5);
+    } else if (event.key === '7' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(6);
+    } else if (event.key === '8' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(7);
+    } else if (event.key === '9' && !event.shiftKey) {
+      event.preventDefault();
+      switchToTab(8);
+    } else if (event.key === '/') {
+      // Cmd+/: toggle sidebar
+      event.preventDefault();
+      toggleSidebar();
+    } else if (event.key === 'l' || event.key === 'L') {
+      // Cmd+L: focus search
+      event.preventDefault();
+      state.activeView = 'search';
+      renderViews();
+    } else if (event.key === 'n' || event.key === 'N') {
+      // Cmd+N: new session (alternative)
+      event.preventDefault();
+      newSession();
+    } else if (event.key === 's' || event.key === 'S') {
+      // Cmd+S: export current session
+      event.preventDefault();
+      exportCurrentSession();
+    } else if (event.key === ',') {
+      // Cmd+,: open settings
+      event.preventDefault();
+      state.activeView = 'settings';
+      renderViews();
+    }
+  });
+
+  // Palette input handler
+  $('#paletteInput')?.addEventListener('input', (e) => {
+    renderPaletteResults(e.target.value);
+  });
+
+  // Palette backdrop closes it
+  $('.palette-backdrop')?.addEventListener('click', () => {
+    toggleCommandPalette();
+  });
+
+  // Escape: cancel current run
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.sending) {
+      // TODO: implement run cancellation via API
+      state.trace.push({ title: '已取消', detail: '运行被中断', status: 'error' });
+      renderTrace();
+    }
+  });
 }
 
 async function init() {
   bindEvents();
   try {
     await loadBaseData();
+    // Initialize tabs from sessions
+    state.tabs = state.sessions.slice(0, 5).map(s => ({
+      id: s.id,
+      sessionId: s.id,
+      title: s.title
+    }));
+    state.activeTabIndex = 0;
+    state.activeSessionId = state.tabs[0]?.sessionId || state.sessions[0]?.id;
+    state.messages = state.activeSessionId
+      ? await api(`/api/sessions/${state.activeSessionId}/messages`)
+      : [];
     render();
   } catch (error) {
     $('#healthText').textContent = error.message;
     $('#healthDot').classList.remove('ok');
   }
+}
+
+// ── Tab Management ──
+async function newSession() {
+  const session = await api('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ title: '新的 Agent 会话' })
+  });
+  const tab = { id: session.id, sessionId: session.id, title: session.title };
+  state.tabs.push(tab);
+  state.activeTabIndex = state.tabs.length - 1;
+  state.activeSessionId = session.id;
+  state.messages = [];
+  state.trace = [];
+  state.sessions = await api('/api/sessions');
+  render();
+  renderTabs();
+}
+
+function closeActiveTab() {
+  if (state.tabs.length <= 1) return;
+  state.tabs.splice(state.activeTabIndex, 1);
+  if (state.activeTabIndex >= state.tabs.length) {
+    state.activeTabIndex = state.tabs.length - 1;
+  }
+  state.activeSessionId = state.tabs[state.activeTabIndex].sessionId;
+  loadSessionMessages(state.activeSessionId);
+  renderTabs();
+}
+
+function switchToTab(index) {
+  if (index < 0 || index >= state.tabs.length) return;
+  state.activeTabIndex = index;
+  state.activeSessionId = state.tabs[index].sessionId;
+  loadSessionMessages(state.activeSessionId);
+  renderTabs();
+}
+
+async function loadSessionMessages(sessionId) {
+  state.messages = await api(`/api/sessions/${sessionId}/messages`);
+  state.trace = [];
+  render();
+  renderTabs();
+}
+
+function renderTabs() {
+  const tabBar = $('#tabBar');
+  if (!tabBar) return;
+  tabBar.innerHTML = state.tabs.map((tab, i) => `
+    <button class="tab-item ${i === state.activeTabIndex ? 'active' : ''}"
+            data-tab-index="${i}" type="button" title="${escapeText(tab.title)}">
+      <span class="tab-title">${escapeText(tab.title || '未命名')}</span>
+      ${state.tabs.length > 1 ? `<button class="tab-close" data-tab-close="${i}" type="button">×</button>` : ''}
+    </button>
+  `).join('');
+
+  document.querySelectorAll('[data-tab-index]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab-close')) return;
+      switchToTab(parseInt(btn.dataset.tabIndex));
+    });
+  });
+
+  document.querySelectorAll('[data-tab-close]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.tabClose);
+      if (state.tabs[idx].sessionId === state.activeSessionId) {
+        closeActiveTab();
+      } else {
+        state.tabs.splice(idx, 1);
+        if (state.activeTabIndex >= state.tabs.length) {
+          state.activeTabIndex = state.tabs.length - 1;
+        }
+        renderTabs();
+      }
+    });
+  });
+}
+
+// ── Command Palette ──
+function toggleCommandPalette() {
+  state.commandPaletteOpen = !state.commandPaletteOpen;
+  const palette = $('#commandPalette');
+  if (palette) {
+    palette.classList.toggle('visible', state.commandPaletteOpen);
+    if (state.commandPaletteOpen) {
+      $('#paletteInput').focus();
+      $('#paletteInput').value = '';
+      $('#paletteResults').innerHTML = '';
+    }
+  }
+}
+
+function renderPaletteResults(query) {
+  const commands = [
+    { id: 'new-session', label: '新会话', detail: 'Cmd+T', shortcut: '⌘T' },
+    { id: 'close-tab', label: '关闭当前标签页', detail: 'Cmd+W', shortcut: '⌘W' },
+    { id: 'export', label: '导出会话', detail: '导出为 Markdown', shortcut: '⌘S' },
+    { id: 'settings', label: '打开设置', detail: '打开运行设置面板', shortcut: '⌘,' },
+    { id: 'search', label: '搜索', detail: '搜索会话和记忆', shortcut: '⌘L' },
+    { id: 'toggle-sidebar', label: '切换侧边栏', detail: '显示/隐藏侧边栏', shortcut: '⌘/' },
+    { id: 'toggle-thinking', label: '切换思考过程面板', detail: '显示/隐藏思考过程', shortcut: '' },
+    { id: 'clear-session', label: '清空当前会话', detail: '清除消息历史', shortcut: '' },
+    { id: 'token-budget', label: '查看 Token 预算', detail: '查看 24h 用量统计', shortcut: '' },
+    { id: 'mcp-start', label: '启动 MCP 服务', detail: '启动本地 MCP 服务', shortcut: '' },
+    { id: 'skills-center', label: '技能中心', detail: '管理已安装技能', shortcut: '' },
+    { id: 'memory-manager', label: '记忆管理', detail: '管理长期记忆', shortcut: '' },
+    { id: 'workspace', label: '工作区', detail: '浏览工作区文件', shortcut: '' },
+    { id: 'approval-queue', label: '审批队列', detail: '查看待处理审批', shortcut: '' },
+  ];
+
+  const q = query.toLowerCase().trim();
+  const filtered = q
+    ? commands.filter(c =>
+        c.label.toLowerCase().includes(q) ||
+        c.detail.toLowerCase().includes(q))
+    : commands.slice(0, 8);
+
+  $('#paletteResults').innerHTML = filtered.map(cmd => `
+    <button class="palette-item" data-cmd="${cmd.id}" type="button">
+      <span class="palette-label">${escapeText(cmd.label)}</span>
+      <span class="palette-detail">${escapeText(cmd.detail)}</span>
+      ${cmd.shortcut ? `<kbd>${cmd.shortcut}</kbd>` : ''}
+    </button>
+  `).join('');
+
+  document.querySelectorAll('.palette-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      executePaletteCommand(btn.dataset.cmd);
+    });
+  });
+}
+
+async function executePaletteCommand(cmdId) {
+  state.commandPaletteOpen = false;
+  const palette = $('#commandPalette');
+  if (palette) palette.classList.remove('visible');
+
+  switch (cmdId) {
+    case 'new-session':
+      await newSession();
+      break;
+    case 'close-tab':
+      closeActiveTab();
+      break;
+    case 'export':
+      exportCurrentSession();
+      break;
+    case 'settings':
+      state.activeView = 'settings';
+      renderViews();
+      break;
+    case 'search':
+      state.activeView = 'search';
+      renderViews();
+      break;
+    case 'toggle-sidebar':
+      toggleSidebar();
+      break;
+    case 'toggle-thinking':
+      const tp = $('#thinkingContent');
+      if (tp) tp.classList.toggle('visible');
+      break;
+    case 'clear-session':
+      // Clear local messages only
+      state.messages = [];
+      renderMessages();
+      break;
+    case 'token-budget':
+      state.activeView = 'settings';
+      renderViews();
+      setTimeout(renderTokenBudget, 100);
+      break;
+    case 'mcp-start':
+      state.activeView = 'mcp';
+      renderViews();
+      break;
+    case 'skills-center':
+      state.activeView = 'skills';
+      renderViews();
+      break;
+    case 'memory-manager':
+      state.activeView = 'memory';
+      renderViews();
+      break;
+    case 'workspace':
+      state.activeView = 'workspace';
+      renderViews();
+      break;
+    case 'approval-queue':
+      state.activeView = 'security';
+      renderViews();
+      break;
+  }
+}
+
+function toggleSidebar() {
+  state.sidebarVisible = !state.sidebarVisible;
+  document.querySelector('.sidebar')?.classList.toggle('hidden', !state.sidebarVisible);
+}
+
+function exportCurrentSession() {
+  if (!state.activeSessionId) return;
+  const link = document.createElement('a');
+  link.href = `/api/sessions/${state.activeSessionId}/export?format=markdown`;
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 init();

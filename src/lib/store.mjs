@@ -162,7 +162,8 @@ function createDefaultState() {
       }
     ],
     skillRuns: [],
-    tokenUsage: []
+    tokenUsage: [],
+    modelConfigs: []
   };
 }
 
@@ -215,7 +216,7 @@ export class JsonStore {
   migrate(state) {
     let changed = false;
     const defaults = createDefaultState();
-    for (const key of ['mcpServers', 'memories', 'skillRuns', 'evolutionEntries']) {
+    for (const key of ['mcpServers', 'memories', 'skillRuns', 'evolutionEntries', 'modelConfigs']) {
       if (!Array.isArray(state[key])) {
         state[key] = defaults[key];
         changed = true;
@@ -561,6 +562,33 @@ export class JsonStore {
 
   listTokenUsage() {
     return this.state.tokenUsage;
+  }
+
+  listModelConfigs() {
+    return this.state.modelConfigs || [];
+  }
+
+  upsertModelConfig(config) {
+    if (!Array.isArray(this.state.modelConfigs)) {
+      this.state.modelConfigs = [];
+    }
+    const idx = this.state.modelConfigs.findIndex(c => c.id === config.id);
+    if (idx >= 0) {
+      this.state.modelConfigs[idx] = { ...this.state.modelConfigs[idx], ...config, updatedAt: now() };
+    } else {
+      this.state.modelConfigs.push({ id: randomUUID(), ...config, createdAt: now(), updatedAt: now() });
+    }
+    this.save();
+    return this.state.modelConfigs;
+  }
+
+  removeModelConfig(id) {
+    if (!Array.isArray(this.state.modelConfigs)) return null;
+    const idx = this.state.modelConfigs.findIndex(c => c.id === id);
+    if (idx < 0) return null;
+    const [removed] = this.state.modelConfigs.splice(idx, 1);
+    this.save();
+    return removed;
   }
 
   search(query) {

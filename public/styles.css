@@ -1066,7 +1066,161 @@ select:focus-visible {
   display: block;
 }
 
-/* ─── Token Budget ─── */
+/* ─── Tab Bar ─── */
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 24px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 150ms, background 150ms;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.tab-item.active {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.tab-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+.tab-close:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* ─── Command Palette ─── */
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+}
+
+.command-palette-overlay.visible {
+  display: flex;
+}
+
+.palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.palette-dialog {
+  position: relative;
+  width: 560px;
+  max-width: 90vw;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md), var(--shadow-glow);
+  overflow: hidden;
+}
+
+.palette-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 16px 20px;
+  font-size: 15px;
+  outline: none;
+}
+
+.palette-input::placeholder {
+  color: var(--text-muted);
+}
+
+.palette-results {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.palette-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13.5px;
+  transition: background 100ms;
+}
+
+.palette-item:hover {
+  background: var(--bg-elevated);
+}
+
+.palette-label {
+  flex: 1;
+  font-weight: 500;
+}
+
+.palette-detail {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.palette-item kbd {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: inherit;
+}
 .token-budget {
   margin-top: 16px;
   padding: 14px;
@@ -1110,6 +1264,90 @@ select:focus-visible {
   font-size: 12px;
   color: var(--text-muted);
   font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* ─── Settings Backup Section ─── */
+.settings-section {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+
+.settings-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.backup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backup-btn {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 150ms, color 150ms;
+}
+
+.backup-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.backup-btn.secondary {
+  background: transparent;
+}
+
+.cloud-backup-form {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cloud-backup-form input {
+  flex: 1;
+  min-width: 200px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 0 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.cloud-backup-form input:focus {
+  border-color: var(--primary);
+}
+
+.cloud-backup-form button {
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--primary);
+  color: white;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cloud-backup-form button:hover {
+  background: #9333EA;
 }
 
 /* ─── Utility ─── */
