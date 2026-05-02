@@ -15,6 +15,7 @@ export class SqliteStore {
     this.filePath = filePath;
     this.db = this._initDb();
     this._migrate();
+    this._initFts();
   }
 
   _initDb() {
@@ -135,9 +136,56 @@ export class SqliteStore {
         status TEXT,
         target TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS token_usage (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        total_tokens INTEGER DEFAULT 0,
+        model TEXT,
+        timestamp INTEGER,
+        created_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_usage_timestamp ON token_usage(timestamp DESC);
+
+      CREATE TABLE IF NOT EXISTS model_configs (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        base_url TEXT,
+        api_key_env TEXT,
+        provider TEXT DEFAULT 'openai-compatible',
+        enabled INTEGER DEFAULT 1,
+        priority INTEGER DEFAULT 1,
+        task_types TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS evolution_entries (
+        id TEXT PRIMARY KEY,
+        skill_id TEXT,
+        trigger TEXT,
+        delta TEXT,
+        result TEXT,
+        applied INTEGER DEFAULT 0,
+        created_at TEXT
+      );
     `);
 
     return db;
+  }
+
+  _initFts() {
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+          content, session_id, role, content='messages', content_rowid='rowid'
+        );
+      `);
+    } catch {
+      // FTS5 may not be available
+    }
   }
 
   _migrate() {
@@ -247,6 +295,9 @@ export class SqliteStore {
       INSERT INTO messages (id, session_id, role, content, trace, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, sessionId, role, content, JSON.stringify(trace), now());
+    // Update FTS index
+    this.db.prepare(`INSERT INTO messages_fts (rowid, content, session_id, role) VALUES (last_insert_rowid(), ?, ?, ?)`)
+      .run(content, sessionId, role);
     this.updateSession(sessionId, { status: 'idle' });
     return { id, sessionId, role, content, trace, createdAt: now() };
   }
@@ -466,6 +517,107 @@ export class SqliteStore {
     if (!row) return null;
     this.db.prepare('DELETE FROM memories WHERE id = ?').run(memoryId);
     return this._mapMemory(row);
+  }
+
+  // Token usage
+  addTokenUsage(entry) {
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO token_usage (id, session_id, input_tokens, output_tokens, total_tokens, model, timestamp, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      entry.sessionId || null,
+      entry.inputTokens || 0,
+      entry.outputTokens || 0,
+      entry.totalTokens || 0,
+      entry.model || 'unknown',
+      entry.timestamp || Date.now(),
+      now()
+    );
+    this.db.prepare(`DELETE FROM token_usage WHERE id NOT IN (SELECT id FROM token_usage ORDER BY created_at DESC LIMIT 1000)`).run();
+    return { id, ...entry };
+  }
+
+  listTokenUsage() {
+    return this.db.prepare('SELECT * FROM token_usage ORDER BY created_at DESC LIMIT 100').all().map(row => ({
+      id: row.id, sessionId: row.session_id, inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens, totalTokens: row.total_tokens,
+      model: row.model, timestamp: row.timestamp, createdAt: row.created_at
+    }));
+  }
+
+  // Model configs
+  listModelConfigs() {
+    return this.db.prepare('SELECT * FROM model_configs ORDER BY priority ASC').all().map(row => ({
+      id: row.id, name: row.name, baseUrl: row.base_url, apiKeyEnv: row.api_key_env,
+      provider: row.provider, enabled: Boolean(row.enabled), priority: row.priority,
+      taskTypes: row.task_types ? JSON.parse(row.task_types) : [],
+      createdAt: row.created_at, updatedAt: row.updated_at
+    }));
+  }
+
+  upsertModelConfig(config) {
+    const existing = config.id ? this.db.prepare('SELECT id FROM model_configs WHERE id = ?').get(config.id) : null;
+    if (existing) {
+      this.db.prepare(`UPDATE model_configs SET name = ?, base_url = ?, api_key_env = ?, provider = ?, enabled = ?, priority = ?, task_types = ?, updated_at = ? WHERE id = ?`)
+        .run(config.name, config.baseUrl || '', config.apiKeyEnv || '', config.provider || 'openai-compatible',
+          config.enabled ? 1 : 0, config.priority || 1, JSON.stringify(config.taskTypes || []), now(), config.id);
+      return this.db.prepare('SELECT * FROM model_configs WHERE id = ?').get(config.id);
+    }
+    const id = config.id || randomUUID();
+    this.db.prepare(`INSERT INTO model_configs (id, name, base_url, api_key_env, provider, enabled, priority, task_types, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, config.name || '', config.baseUrl || '', config.apiKeyEnv || '', config.provider || 'openai-compatible',
+        config.enabled !== false ? 1 : 0, config.priority || 1, JSON.stringify(config.taskTypes || []), now(), now());
+    return this.db.prepare('SELECT * FROM model_configs WHERE id = ?').get(id);
+  }
+
+  removeModelConfig(id) {
+    const row = this.db.prepare('SELECT * FROM model_configs WHERE id = ?').get(id);
+    if (!row) return null;
+    this.db.prepare('DELETE FROM model_configs WHERE id = ?').run(id);
+    return row;
+  }
+
+  // Evolution entries
+  listEvolutionEntries(skillId = null) {
+    const sql = skillId
+      ? 'SELECT * FROM evolution_entries WHERE skill_id = ? ORDER BY created_at DESC LIMIT 200'
+      : 'SELECT * FROM evolution_entries ORDER BY created_at DESC LIMIT 200';
+    return this.db.prepare(sql).all(skillId || undefined).map(row => ({
+      id: row.id, skillId: row.skill_id, trigger: row.trigger, delta: row.delta ? JSON.parse(row.delta) : {},
+      result: row.result ? JSON.parse(row.result) : {}, applied: Boolean(row.applied), createdAt: row.created_at
+    }));
+  }
+
+  addEvolutionEntry(entry) {
+    const id = entry.id || randomUUID();
+    this.db.prepare(`INSERT INTO evolution_entries (id, skill_id, trigger, delta, result, applied, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, entry.skillId || '', entry.trigger || '', JSON.stringify(entry.delta || {}), JSON.stringify(entry.result || {}), entry.applied ? 1 : 0, now());
+    return { id, ...entry, createdAt: now() };
+  }
+
+  updateEvolutionEntry(entryId, patch) {
+    const fields = [];
+    const values = [];
+    if (patch.applied !== undefined) { fields.push('applied = ?'); values.push(patch.applied ? 1 : 0); }
+    if (patch.delta !== undefined) { fields.push('delta = ?'); values.push(JSON.stringify(patch.delta)); }
+    if (fields.length === 0) return null;
+    values.push(entryId);
+    this.db.prepare(`UPDATE evolution_entries SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.db.prepare('SELECT * FROM evolution_entries WHERE id = ?').get(entryId);
+  }
+
+  // Full-text search on messages
+  searchMessagesFts(query, limit = 50) {
+    const results = this.db.prepare(`
+      SELECT m.*, s.title as session_title
+      FROM messages m
+      JOIN sessions s ON m.session_id = s.id
+      WHERE m.content MATCH ?
+      ORDER BY m.created_at DESC LIMIT ?
+    `).all(query, limit);
+    return results.map(row => ({ ...this._mapMessage(row), sessionTitle: row.session_title }));
   }
 
   search(query) {

@@ -23,6 +23,10 @@ import { ContextCompactor, SubagentManager } from './runtime/sandboxExecutor.mjs
 import { renderDiffAsText } from './lib/diffEngine.mjs';
 import { WorkflowEngine, parseAgentWorkflow } from './runtime/workflowEngine.mjs';
 import { createToolRegistry } from './runtime/toolRegistry.mjs';
+import { WorkspaceWatcher } from './lib/fileWatcher.mjs';
+import { PluginManager, createPluginScaffold } from './lib/pluginSystem.mjs';
+import { TaskScheduler } from './lib/taskScheduler.mjs';
+import { RollbackManager } from './lib/rollbackManager.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,7 +35,16 @@ const publicDir = path.join(projectRoot, 'public');
 const store = new JsonStore();
 const mcpManager = new McpManager({ store });
 const subagentManager = new SubagentManager({ store, settings: store.getSettings() });
+const workspaceWatcher = new WorkspaceWatcher({ store });
+const pluginManager = new PluginManager({ store, settings: store.getSettings() });
+const taskScheduler = new TaskScheduler({ store, subagentManager });
+const rollbackManager = new RollbackManager({
+  store,
+  workspaceRoot: store.getSettings().workspaceRoot
+});
 const runs = new Map();
+const runCancellers = new Map();
+const fileChangeSubscribers = new Set();
 const startedAt = new Date();
 
 function loadBuildInfo() {
@@ -241,8 +254,15 @@ async function handleRunEvents(req, res, runId) {
       connectors: store.listConnectors(),
       memories: store.listMemories(),
       mcpTools,
-      recordUsage
+      autonomousLoop: store.getSettings().autonomousMode || false,
+      recordUsage,
+      isCancelled: () => run.cancelled
     })) {
+      if (run.cancelled) {
+        sendSse(res, { type: 'done', detail: '运行已取消' });
+        res.end();
+        break;
+      }
       if (event.type === 'assistant.delta') {
         assistantContent += event.delta;
       }
@@ -380,8 +400,10 @@ async function handleApi(req, res) {
       id: randomUUID(),
       sessionId: session.id,
       prompt,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      cancelled: false
     };
+    runCancellers.set(run.id, () => { run.cancelled = true; });
     runs.set(run.id, run);
     sendJson(res, 201, { runId: run.id });
     return;
@@ -389,6 +411,18 @@ async function handleApi(req, res) {
 
   if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'runs' && parts[3] === 'events') {
     await handleRunEvents(req, res, parts[2]);
+    return;
+  }
+
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'runs' && parts[3] === 'cancel') {
+    const runId = parts[2];
+    const canceller = runCancellers.get(runId);
+    if (canceller) {
+      canceller();
+      sendJson(res, 200, { ok: true, message: 'Run cancellation requested' });
+    } else {
+      sendJson(res, 404, { error: 'Run not found or already completed' });
+    }
     return;
   }
 
@@ -665,6 +699,16 @@ async function handleApi(req, res) {
     const body = await parseJson(req);
     subagentManager.fail(parts[2], body.error);
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'subagents' && parts.length === 3) {
+    const subagent = subagentManager.get(parts[2]);
+    if (!subagent) {
+      sendJson(res, 404, { error: 'Subagent not found' });
+      return;
+    }
+    sendJson(res, 200, subagent);
     return;
   }
 
@@ -977,8 +1021,99 @@ async function handleApi(req, res) {
     return;
   }
 
+  // File watcher management
+  if (req.method === 'POST' && url.pathname === '/api/watcher/start') {
+    try {
+      workspaceWatcher.startWatching();
+      sendJson(res, 200, { ok: true, message: '文件监控已启动' });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/watcher/stop') {
+    workspaceWatcher.stopWatching();
+    sendJson(res, 200, { ok: true, message: '文件监控已停止' });
+    return;
+  }
+
+  // Subscribe to file change SSE stream
+  if (req.method === 'GET' && url.pathname === '/api/watcher/events') {
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive'
+    });
+    fileChangeSubscribers.add(res);
+    res.on('close', () => fileChangeSubscribers.delete(res));
+    return;
+  }
+
+  // Plugin routes
+  if (req.method === 'GET' && url.pathname === '/api/plugins') {
+    sendJson(res, 200, {
+      plugins: pluginManager.listPlugins(),
+      hookCount: pluginManager.getHookCount()
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/plugins/scan') {
+    try {
+      const loaded = await pluginManager.loadAllPlugins();
+      sendJson(res, 200, { ok: true, loaded: loaded.length });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/plugins/scaffold') {
+    const body = await parseJson(req);
+    const { name } = body;
+    if (!name) {
+      sendJson(res, 400, { error: 'plugin name required' });
+      return;
+    }
+    try {
+      const scaffold = createPluginScaffold(name);
+      const pluginDir = path.join(store.getSettings().workspaceRoot, 'plugins', name.toLowerCase().replace(/\s+/g, '-'));
+      fs.mkdirSync(pluginDir, { recursive: true });
+      for (const [filename, content] of Object.entries(scaffold)) {
+        if (filename !== 'manifest.json') continue;
+        fs.writeFileSync(path.join(pluginDir, filename), content);
+      }
+      sendJson(res, 201, { ok: true, path: pluginDir });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // Rollback routes
+  if (req.method === 'GET' && url.pathname === '/api/rollback') {
+    sendJson(res, 200, rollbackManager.listOperations());
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/rollback') {
+    const body = await parseJson(req);
+    const { operationId } = body;
+    if (!operationId) {
+      sendJson(res, 400, { error: 'operationId required' });
+      return;
+    }
+    try {
+      const result = await rollbackManager.rollback(operationId);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
   notFound(res);
-}
 
 function createServer() {
   return http.createServer(async (req, res) => {
@@ -1003,4 +1138,5 @@ if (args.doctor) {
 
 createServer().listen(args.port, '127.0.0.1', () => {
   console.log(`AIAgent Client running at http://127.0.0.1:${args.port}`);
+  taskScheduler.start();
 });

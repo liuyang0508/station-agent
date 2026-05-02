@@ -23,6 +23,7 @@ function createDefaultState() {
     settings: {
       workspaceRoot,
       runtimeMode: 'demo',
+      autonomousMode: false,
       provider: 'openai-compatible',
       baseUrl: '',
       model: 'gpt-5.2',
@@ -465,6 +466,14 @@ export class JsonStore {
 
   listTasks() {
     return this.state.tasks;
+  }
+
+  updateTask(taskId, patch) {
+    const task = this.state.tasks.find(t => t.id === taskId);
+    if (!task) return null;
+    Object.assign(task, patch);
+    this.save();
+    return task;
   }
 
   listApprovals() {

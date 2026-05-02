@@ -90,7 +90,7 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
   }
 
   async *runTurn(prompt, context) {
-    const { session, history, settings, skills, connectors, memories = [], tools } = context;
+    const { session, history, settings, skills, connectors, memories = [], tools, autonomousLoop = false } = context;
 
     yield { type: 'trace', title: '任务解析', detail: '识别用户目标、当前会话、工作区和可用技能。', status: 'running' };
     await wait(160);
@@ -109,8 +109,13 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
     yield { type: 'trace', title: '模型运行时', detail: `调用 MiniMax / ${settings.model}，可用工具 ${toolList.length} 个`, status: 'running' };
 
     const baseUrl = settings.baseUrl.replace(/\/+$/, '');
-    const MAX_TURN_LOOPS = 10;
+    const MAX_TURN_LOOPS = autonomousLoop ? 50 : 10;
     let turnCount = 0;
+
+    // Build the continuation prompt for autonomous mode
+    const continuePrompt = autonomousLoop
+      ? '\n\n请决定下一步：继续执行任务，或者回复"DONE"表示任务完成。如果需要用户确认才继续，请回复"WAIT"。'
+      : '';
 
     const systemMessage = {
       role: 'user',
@@ -123,7 +128,7 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
         role: message.role === 'assistant' ? 'assistant' : 'user',
         content: message.content
       })),
-      { role: 'user', content: prompt }
+      { role: 'user', content: prompt + continuePrompt }
     ];
 
     while (turnCount < MAX_TURN_LOOPS) {
@@ -249,7 +254,21 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
           continue;
         }
 
-        // No tool calls - we're done
+        // No tool calls - check for autonomous loop exit signals
+        if (autonomousLoop && textContent) {
+          const upper = textContent.toUpperCase();
+          if (upper.includes('DONE') || upper.includes('完成')) {
+            yield { type: 'trace', title: '自主循环', detail: 'Agent 报告任务完成，退出循环', status: 'ok' };
+            yield { type: 'done', detail: '运行完成（Agent 自主结束）' };
+            return;
+          }
+          if (upper.includes('WAIT') || upper.includes('等待')) {
+            yield { type: 'trace', title: '自主循环', detail: 'Agent 请求用户确认，继续等待', status: 'ok' };
+            yield { type: 'done', detail: '运行完成（等待用户确认）' };
+            return;
+          }
+        }
+
         yield { type: 'done', detail: '运行完成' };
         return;
       } catch (error) {

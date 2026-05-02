@@ -21,10 +21,11 @@ const state = {
   activeView: 'chat',
   trace: [],
   sending: false,
-  tabs: [],           // array of {id, sessionId, title}
+  tabs: [],
   activeTabIndex: 0,
   commandPaletteOpen: false,
-  sidebarVisible: true
+  sidebarVisible: true,
+  currentRunId: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -513,6 +514,7 @@ function renderSettings() {
   $('#apiKeyEnvInput').value = state.settings?.apiKeyEnv || 'AIAGENT_API_KEY';
   $('#apiKeyInput').value = '';
   $('#modelTestStatus').textContent = state.modelTestStatus;
+  $('#autonomousModeInput').checked = state.settings?.autonomousMode || false;
   renderTokenBudget();
 }
 
@@ -551,6 +553,8 @@ function renderViews() {
     'tasks',
     'security',
     'memory',
+    'diff',
+    'subagents',
     'settings'
   ];
   for (const view of views) {
@@ -613,6 +617,7 @@ async function sendPrompt(prompt) {
     body: JSON.stringify({ sessionId: state.activeSessionId, prompt })
   });
 
+  state.currentRunId = runId;
   const events = new EventSource(`/api/runs/${runId}/events`);
   events.onmessage = async (message) => {
     const event = JSON.parse(message.data);
@@ -630,6 +635,7 @@ async function sendPrompt(prompt) {
       renderTrace();
     } else if (event.type === 'stored') {
       events.close();
+      state.currentRunId = null;
       thinkingContent = '';
       const thinkEl = $('#thinkingContent');
       if (thinkEl) thinkEl.classList.remove('visible');
@@ -1021,12 +1027,100 @@ function bindEvents() {
 
   // Escape: cancel current run
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && state.sending) {
-      // TODO: implement run cancellation via API
-      state.trace.push({ title: '已取消', detail: '运行被中断', status: 'error' });
-      renderTrace();
+    if (event.key === 'Escape') {
+      if (state.sending && state.currentRunId) {
+        api(`/api/runs/${state.currentRunId}/cancel`, { method: 'POST' }).catch(() => {});
+        state.trace.push({ title: '已取消', detail: '运行被用户中断', status: 'error' });
+        renderTrace();
+      }
     }
   });
+
+  // Voice input
+  const voiceBtn = $('#voiceInputBtn');
+  let recognition = null;
+  if (voiceBtn && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    voiceBtn.addEventListener('click', () => {
+      if (recognition && recognition.recording) {
+        recognition.stop();
+        voiceBtn.classList.remove('recording');
+        recognition.recording = false;
+        return;
+      }
+      recognition = new SR();
+      recognition.recording = true;
+      recognition.lang = state.settings?.language === 'zh-CN' ? 'zh-CN' : 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      voiceBtn.classList.add('recording');
+      recognition.start();
+      recognition.onresult = (e) => {
+        const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+        const input = $('#promptInput');
+        if (input) input.value = (input.value + ' ' + transcript).trim();
+      };
+      recognition.onerror = () => {
+        voiceBtn.classList.remove('recording');
+        recognition.recording = false;
+      };
+      recognition.onend = () => {
+        voiceBtn.classList.remove('recording');
+        if (recognition) recognition.recording = false;
+      };
+    });
+  }
+
+  // Diff viewer
+  $('#diffRunBtn')?.addEventListener('click', async () => {
+    const oldPath = $('#diffOldPath')?.value?.trim();
+    const newPath = $('#diffNewPath')?.value?.trim();
+    if (!oldPath || !newPath) return;
+    try {
+      const result = await api('/api/diff', {
+        method: 'POST',
+        body: JSON.stringify({ oldPath, newPath })
+      });
+      const output = $('#diffOutput');
+      if (!result.identical && result.lines) {
+        output.innerHTML = result.lines.map(line => {
+          const cls = line.startsWith('+') ? 'diff-line-added' : line.startsWith('-') ? 'diff-line-removed' : '';
+          return `<div class="${cls}">${escapeText(line)}</div>`;
+        }).join('');
+      } else {
+        output.innerHTML = '<div class="item-detail">文件相同，无差异。</div>';
+      }
+    } catch (err) {
+      $('#diffOutput').innerHTML = `<div class="item-detail" style="color:var(--danger)">${escapeText(err.message)}</div>`;
+    }
+  });
+
+  // Subagent refresh
+  async function refreshSubagents() {
+    try {
+      const subagents = await api('/api/subagents');
+      $('#subagentCount').textContent = subagents.length;
+      if (subagents.length === 0) {
+        $('#subagentList').innerHTML = '<div class="item-detail">暂无活跃的子代理。</div>';
+        return;
+      }
+      $('#subagentList').innerHTML = subagents.map(s => `
+        <div class="subagent-item">
+          <div class="subagent-title">${escapeText(s.task || '子任务')}</div>
+          <div class="subagent-meta">${s.status} · ${s.priority} · ${s.createdAt ? formatTime(s.createdAt) : ''}</div>
+        </div>
+      `).join('');
+    } catch {
+      // ignore
+    }
+  }
+
+  // Poll subagents when on subagents view
+  const originalRenderViews = renderViews;
+  const subagentPollInterval = setInterval(refreshSubagents, 5000);
+
+  // Cleanup on unload
+  window.addEventListener('unload', () => clearInterval(subagentPollInterval));
 }
 
 async function init() {
