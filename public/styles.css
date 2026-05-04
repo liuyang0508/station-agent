@@ -421,6 +421,75 @@ select:focus-visible {
   font-size: 14px;
 }
 
+/* ─── Markdown Rendering ─── */
+.message-content table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.message-content th,
+.message-content td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+.message-content th {
+  background: var(--bg-surface);
+  font-weight: 600;
+}
+.message-content tr:nth-child(even) td {
+  background: rgba(128,128,128,0.05);
+}
+.message-content code {
+  background: rgba(128,128,128,0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'SF Mono', Consolas, monospace;
+}
+.message-content pre {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.message-content pre code {
+  background: none;
+  padding: 0;
+}
+.message-content ul,
+.message-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+.message-content li {
+  margin: 4px 0;
+}
+.message-content h1,
+.message-content h2,
+.message-content h3 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+.message-content h1 { font-size: 18px; }
+.message-content h2 { font-size: 16px; }
+.message-content h3 { font-size: 14px; }
+.message-content blockquote {
+  border-left: 3px solid var(--border);
+  margin: 8px 0;
+  padding-left: 12px;
+  color: var(--text-secondary);
+}
+.message-content a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+.message-content strong {
+  font-weight: 600;
+}
+
 /* ─── Composer ─── */
 .composer {
   display: grid;

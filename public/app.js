@@ -60,6 +60,18 @@ function escapeText(value) {
   return div.innerHTML;
 }
 
+function renderMarkdown(value) {
+  if (typeof marked !== 'undefined' && value) {
+    try {
+      marked.setOptions({ breaks: true, gfm: true, tables: true });
+      return marked.parse(value);
+    } catch {
+      return escapeText(value);
+    }
+  }
+  return escapeText(value);
+}
+
 async function loadBaseData() {
   const [health, blueprint, sessions, skills, connectors, mcpServers, tasks, approvals, memories, settings] =
     await Promise.all([
@@ -178,7 +190,7 @@ function renderMessages() {
       (message) => `
         <article class="message ${message.role}">
           <div class="message-role">${message.role === 'assistant' ? 'Agent' : 'You'}</div>
-          <div class="message-content">${escapeText(message.content)}</div>
+          <div class="message-content">${message.role === 'assistant' ? renderMarkdown(message.content) : escapeText(message.content)}</div>
         </article>
       `
     )
