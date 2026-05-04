@@ -9,6 +9,7 @@ import {
   parseSkillMarkdown,
   detectSkillFormat
 } from './skillFormats.mjs';
+import { createSkillEvolution } from './skillEvolution.mjs';
 
 function readJsonIfExists(filePath) {
   if (!fs.existsSync(filePath)) return null;
@@ -274,13 +275,23 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
     throw new Error('技能未启用');
   }
 
+  const skillEvolution = createSkillEvolution(store);
+
   if (!skill.command && !skill.entrypoint) {
     const output = [
       `技能 ${skill.name} 已完成一次本地编排检查。`,
       `入口: ${skill.entrypoint || '未配置'}`,
       `输入: ${JSON.stringify(input)}`
     ].join('\n');
-    return store.recordSkillRun({ skillId, status: 'completed', input, output });
+    const runRecord = store.recordSkillRun({ skillId, status: 'completed', input, output });
+    // Trigger evolution evaluation (async, non-blocking)
+    const evolution = skillEvolution.evaluate(runRecord, { context: {} });
+    if (evolution) {
+      skillEvolution.evolve(skillId, evolution).catch(err => {
+        console.error('Evolution failed:', err);
+      });
+    }
+    return runRecord;
   }
 
   // Sandbox execution for JS/Python scripts
@@ -296,13 +307,21 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
       skillName: skill.name
     };
     const result = await executor.execute(code, language, sandboxContext);
-    return store.recordSkillRun({
+    const runRecord = store.recordSkillRun({
       skillId,
       status: result.ok ? 'completed' : 'failed',
       input,
       output: result.stdout,
       error: result.stderr || (result.ok ? '' : result.error)
     });
+    // Trigger evolution evaluation (async, non-blocking)
+    const evolution = skillEvolution.evaluate(runRecord, { context: {} });
+    if (evolution) {
+      skillEvolution.evolve(skillId, evolution).catch(err => {
+        console.error('Evolution failed:', err);
+      });
+    }
+    return runRecord;
   }
 
   // Shell command fallback
@@ -313,11 +332,19 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
     workspaceRoot: settings.workspaceRoot,
     timeoutMs: 15000
   });
-  return store.recordSkillRun({
+  const runRecord = store.recordSkillRun({
     skillId,
     status: result.ok ? 'completed' : 'failed',
     input,
     output: result.stdout,
     error: result.stderr || (result.ok ? '' : `exit ${result.exitCode}`)
   });
+  // Trigger evolution evaluation (async, non-blocking)
+  const evolution = skillEvolution.evaluate(runRecord, { context: {} });
+  if (evolution) {
+    skillEvolution.evolve(skillId, evolution).catch(err => {
+      console.error('Evolution failed:', err);
+    });
+  }
+  return runRecord;
 }
