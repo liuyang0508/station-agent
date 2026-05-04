@@ -24,12 +24,18 @@ function chunkText(text, size = 72) {
 function buildSystemPrompt({ skills, memories = [] }) {
   const enabledSkills = skills
     .filter((skill) => skill.enabled)
-    .map((skill) => `${skill.name}: ${skill.description}`)
+    .map((skill) => `[${skill.name}] ${skill.description}`)
     .join('\n');
   const memoryContext = memories
     .slice(0, 8)
     .map((memory) => `${memory.title}: ${memory.content}`)
     .join('\n');
+
+  // Extract karpathy-guidelines body as mandatory constraints
+  const karpathySkill = skills.find(s => s.name === 'karpathy-guidelines' && s.enabled);
+  const karpathyConstraints = karpathySkill?.metadata?.body
+    ? `\n\n强制约束（必须遵守）:\n${karpathySkill.metadata.body.slice(0, 2000)}`
+    : '';
 
   return [
     '你是 AIAgent Client 的本地 Agent Runtime。',
@@ -38,7 +44,8 @@ function buildSystemPrompt({ skills, memories = [] }) {
     '当任务复杂时，先给出可执行计划，再推进到交付物、命令或代码变更。',
     `可用技能:\n${enabledSkills || '暂无启用技能。'}`,
     `长期记忆:\n${memoryContext || '暂无长期记忆。'}`,
-    `产品原则:\n${referenceBlueprint.runtimePrinciples.join('\n')}`
+    `产品原则:\n${referenceBlueprint.runtimePrinciples.join('\n')}`,
+    karpathyConstraints
   ].join('\n\n');
 }
 

@@ -30,6 +30,18 @@ def main():
     protocol = JSONRPCProtocol()
     skill_mgr = get_skill_manager()
 
+    # Auto-load skills from skills directory
+    skills_dir = Path(__file__).parent.parent / "skills"
+    if skills_dir.exists():
+        for skill_file in skills_dir.glob("*.py"):
+            if skill_file.name.startswith("_"):
+                continue
+            try:
+                skill_mgr.load(skill_file)
+                log.info(f"Auto-loaded skill: {skill_file.stem}")
+            except Exception as e:
+                log.warning(f"Failed to auto-load {skill_file.name}: {e}")
+
     # Register skill.* methods
     def wrap(fn):
         def inner(params):

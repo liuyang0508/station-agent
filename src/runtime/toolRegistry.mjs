@@ -37,6 +37,13 @@ function safeReadFile(workspaceRoot, relativePath, maxBytes = 512 * 1024) {
   };
 }
 
+// Singleton Python sidecar instance - set via setPythonSidecar()
+let _pythonSidecar = null;
+
+export function setPythonSidecar(sidecar) {
+  _pythonSidecar = sidecar;
+}
+
 export function createToolRegistry({ settings, mcpTools = [], skills = [] }) {
   const tools = new Map();
 
@@ -220,13 +227,22 @@ export function createToolRegistry({ settings, mcpTools = [], skills = [] }) {
             context: { type: 'object', description: 'Execution context for the skill' }
           }
         },
-        run(args = {}) {
-          if (!isExecutable) {
-            return { error: `Skill "${skill.name}" is not directly executable. It provides guidelines injected into the system prompt.` };
+        async run(args = {}) {
+          // Try Python sidecar first for executable skills
+          if (_pythonSidecar && isExecutable) {
+            try {
+              const result = await _pythonSidecar.skillRun(skill.name, args.context || {});
+              return result;
+            } catch (e) {
+              return { error: `Python sidecar error: ${e.message}` };
+            }
           }
-          return { error: `Skill execution not yet implemented for "${skill.name}". Entry point: ${skill.entrypoint || 'none'}` };
+          if (!isExecutable) {
+            return { description: skill.description, guidelines: 'This skill provides guidelines. Reference it in your work but do not call it as a tool.' };
+          }
+          return { error: `Skill "${skill.name}" execution unavailable. Python sidecar not connected.` };
         },
-        _skill: skill // preserve raw skill data
+        _skill: skill
       });
     }
   }

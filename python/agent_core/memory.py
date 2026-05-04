@@ -1,5 +1,7 @@
 """Memory system with SQLite storage and vector search."""
 
+import hashlib
+import json
 import sqlite3
 import uuid
 from pathlib import Path
@@ -16,6 +18,16 @@ try:
     HAS_ML_DISTANCE = True
 except ImportError:
     HAS_ML_DISTANCE = False
+
+# Use numpy for cosine similarity if ml_distance not available
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    if HAS_ML_DISTANCE:
+        return cosine(a, b)
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(np.dot(a, b) / (norm_a * norm_b))
 
 
 class MemorySystem:
@@ -48,6 +60,32 @@ class MemorySystem:
         """)
         self.conn.commit()
 
+    def _generate_embedding(self, content: str, dim: int = 128) -> list[float]:
+        """Generate a deterministic embedding from text content using word hashing.
+
+        Uses hash of each word to seed a pseudo-random vector, then sums.
+        This provides a simple but reproducible embedding without LLM calls.
+        """
+        if not HAS_NUMPY:
+            return [0.0] * dim
+
+        words = content.lower().split()
+        vector = np.zeros(dim, dtype=np.float32)
+
+        for word in words:
+            # Use MD5 hash of word as seed for deterministic randomness
+            word_hash = hashlib.md5(word.encode()).digest()
+            seed = int.from_bytes(word_hash[:4], "little")
+            rng = np.random.RandomState(seed)
+            vector += rng.rand(dim).astype(np.float32)
+
+        # Normalize to unit length
+        norm = np.linalg.norm(vector)
+        if norm > 0:
+            vector = vector / norm
+
+        return vector.tolist()
+
     def store(self, params: dict[str, Any]) -> dict[str, Any]:
         """Store a memory with optional embedding.
 
@@ -63,6 +101,8 @@ class MemorySystem:
         memory_id = str(uuid.uuid4())
         metadata = params.get("metadata", {})
         embedding = params.get("embedding")
+        if embedding is None and HAS_NUMPY:
+            embedding = self._generate_embedding(content)
 
         self.conn.execute(
             "INSERT INTO memories (id, content, metadata) VALUES (?, ?, ?)",
@@ -92,8 +132,8 @@ class MemorySystem:
         if not embedding:
             return {"success": False, "error": "embedding required"}
 
-        if not HAS_NUMPY or not HAS_ML_DISTANCE:
-            return {"success": False, "error": "numpy/ml-distance not available"}
+        if not HAS_NUMPY:
+            return {"success": False, "error": "numpy not available"}
 
         query = np.array(embedding, dtype=np.float32)
 
@@ -106,7 +146,7 @@ class MemorySystem:
             if blob is None:
                 continue
             vec = np.frombuffer(blob, dtype=np.float32)
-            sim = cosine(query, vec)
+            sim = _cosine_similarity(query, vec)
             results.append((memory_id, float(sim)))
 
         results.sort(key=lambda x: x[1], reverse=True)

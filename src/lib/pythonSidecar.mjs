@@ -14,15 +14,17 @@ export class PythonSidecar {
   #proc = null;
   #requestId = 0;
   #pythonPath = null;
+  #basePath = null;
 
-  constructor(pythonPath = null) {
+  constructor(pythonPath = null, basePath = null) {
     this.#pythonPath = pythonPath || "python3";
+    this.#basePath = basePath || join(__dirname, "..", "..");
   }
 
   start() {
     if (this.#proc !== null) return;
 
-    const mainPath = join(__dirname, "..", "python", "agent_core", "main.py");
+    const mainPath = join(this.#basePath, "python", "agent_core", "main.py");
 
     this.#proc = spawn(this.#pythonPath, [mainPath], {
       stdio: ["pipe", "pipe", "pipe"],

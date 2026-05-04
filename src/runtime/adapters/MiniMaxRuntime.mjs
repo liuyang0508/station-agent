@@ -208,7 +208,7 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
             try {
               let result;
               if (tools.has(toolName)) {
-                result = tools.run(toolName, toolInput);
+                result = await tools.run(toolName, toolInput);
               } else {
                 result = { error: `Unknown tool: ${toolName}` };
               }
