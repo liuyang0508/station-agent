@@ -16,8 +16,10 @@ import { exportSessionJson, exportSessionMarkdown } from './lib/sessionExport.mj
 import { installSkillFromWorkspace, runSkill } from './lib/skillManager.mjs';
 import { listWorkspaceDirectory, readWorkspaceFile } from './lib/workspace.mjs';
 import { runAgentTurn } from './runtime/agentRuntime.mjs';
+import { setPythonSidecar } from './runtime/toolRegistry.mjs';
 import { parseSkillMarkdown } from './lib/skillFormats.mjs';
 import { SkillEvolution } from './lib/skillEvolution.mjs';
+import { PythonSidecar } from './lib/pythonSidecar.mjs';
 import { testModelConnection } from './runtime/modelRuntime.mjs';
 import { ContextCompactor, SubagentManager } from './runtime/sandboxExecutor.mjs';
 import { renderDiffAsText } from './lib/diffEngine.mjs';
@@ -28,6 +30,7 @@ import { PluginManager, createPluginScaffold } from './lib/pluginSystem.mjs';
 import { TaskScheduler } from './lib/taskScheduler.mjs';
 import { RollbackManager } from './lib/rollbackManager.mjs';
 import { SkillSyncManager } from './lib/skillSyncManager.mjs';
+import { PythonBridge } from './runtime/pythonBridge.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,6 +46,13 @@ const taskScheduler = new TaskScheduler({ store, subagentManager });
 const rollbackManager = new RollbackManager({
   store,
   workspaceRoot: store.getSettings().workspaceRoot
+});
+const pythonSidecar = new PythonSidecar("python3", projectRoot);
+setPythonSidecar(pythonSidecar); // make available to tool registry
+const pythonBridge = new PythonBridge({
+  pythonPath: 'python3',
+  scriptPath: path.join(projectRoot, 'python', 'agent_core', 'ipc.py'),
+  timeoutMs: 60000
 });
 const runs = new Map();
 const runCancellers = new Map();
@@ -1176,6 +1186,102 @@ async function handleApi(req, res) {
     return;
   }
 
+  // ─── Python Sidecar Routes ────────────────────────────────────
+  if (req.method === 'GET' && url.pathname === '/api/python/skills') {
+    try {
+      const skills = await pythonSidecar.skillList();
+      sendJson(res, 200, skills);
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/python/skills/load') {
+    try {
+      const { path: skillPath } = await parseJson(req);
+      const result = await pythonSidecar.skillLoad(skillPath);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/python/skills/run') {
+    try {
+      const { name, context } = await parseJson(req);
+      const result = await pythonSidecar.skillRun(name, context);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/python/memories') {
+    try {
+      const memories = await pythonSidecar.memoryList();
+      sendJson(res, 200, memories);
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/python/memories') {
+    try {
+      const { content, metadata, embedding } = await parseJson(req);
+      const result = await pythonSidecar.memoryStore(content, metadata || {}, embedding);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/python/exec') {
+    try {
+      const { code, cwd, timeout } = await parseJson(req);
+      const result = await pythonSidecar.execRun(code, cwd, timeout);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/agent/run - Execute with Python Agent
+  if (req.method === 'POST' && url.pathname === '/api/agent/run') {
+    try {
+      const { input, context } = await parseJson(req);
+      const result = await pythonBridge.run(input, context);
+      sendJson(res, 200, { success: true, result });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/agent/stream - Streaming execution (SSE)
+  if (req.method === 'GET' && url.pathname === '/api/agent/stream') {
+    const { input, context } = url.searchParams ? Object.fromEntries(url.searchParams) : {};
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    try {
+      for await (const chunk of pythonBridge.runStreaming(input, { context })) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+    } catch (error) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+    return;
+  }
+
   // Default: 404
   notFound(res);
 }
@@ -1205,6 +1311,15 @@ if (args.doctor) {
 skillSyncManager.syncAll().catch(err => {
   console.warn('Skill sync failed (non-critical):', err.message);
 });
+
+// Start Python sidecar
+try {
+  pythonSidecar.start();
+} catch (e) {
+  console.warn('Python sidecar start failed:', e.message);
+}
+
+process.on('exit', () => pythonSidecar.stop());
 
 createServer().listen(args.port, '127.0.0.1', () => {
   console.log(`AIAgent Client running at http://127.0.0.1:${args.port}`);
