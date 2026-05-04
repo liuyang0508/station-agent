@@ -18,7 +18,7 @@ import { listWorkspaceDirectory, readWorkspaceFile } from './lib/workspace.mjs';
 import { runAgentTurn } from './runtime/agentRuntime.mjs';
 import { setPythonSidecar } from './runtime/toolRegistry.mjs';
 import { parseSkillMarkdown } from './lib/skillFormats.mjs';
-import { SkillEvolution } from './lib/skillEvolution.mjs';
+import { SkillEvolution, createSkillEvolution } from './lib/skillEvolution.mjs';
 import { PythonSidecar } from './lib/pythonSidecar.mjs';
 import { testModelConnection } from './runtime/modelRuntime.mjs';
 import { ContextCompactor, SubagentManager } from './runtime/sandboxExecutor.mjs';
@@ -55,6 +55,7 @@ const pythonBridge = new PythonBridge({
   scriptPath: path.join(projectRoot, 'python', 'agent_core', 'ipc.py'),
   timeoutMs: 60000
 });
+const skillEvolution = createSkillEvolution(store);
 const runs = new Map();
 const runCancellers = new Map();
 const fileChangeSubscribers = new Set();
@@ -1222,6 +1223,47 @@ async function handleApi(req, res) {
 
   if (req.method === 'GET' && url.pathname === '/api/skills/sync-status') {
     sendJson(res, 200, skillSyncManager.getStatus());
+    return;
+  }
+
+  // GET /api/skills/:id/evolution - Get skill evolution history
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'evolution') {
+    try {
+      const entries = store.listEvolutionEntries(parts[2]);
+      sendJson(res, 200, { success: true, entries });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/skills/:id/evolution - Manually trigger evolution
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'evolution') {
+    try {
+      const body = await parseJson(req);
+      const { action, trigger, delta } = body;
+      const evolution = {
+        action,
+        trigger,
+        delta,
+        reason: 'Manual trigger'
+      };
+      const entry = await skillEvolution.evolve(parts[2], evolution);
+      sendJson(res, 200, { success: true, entry });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/skills/evolution/history - Get global evolution history
+  if (req.method === 'GET' && url.pathname === '/api/skills/evolution/history') {
+    try {
+      const entries = store.listEvolutionEntries();
+      sendJson(res, 200, { success: true, entries });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
     return;
   }
 
