@@ -891,6 +891,36 @@ async function handleApi(req, res) {
     return;
   }
 
+  // POST /api/memories/search - Vector-based memory search
+  if (req.method === 'POST' && url.pathname === '/api/memories/search') {
+    try {
+      const { query, limit = 5 } = await parseJson(req);
+
+      if (!query) {
+        sendJson(res, 400, { error: 'query required' });
+        return;
+      }
+
+      const embedding = await generateEmbedding(query);
+      const results = store.searchMemoriesByVector(Array.from(embedding), limit);
+
+      sendJson(res, 200, {
+        success: true,
+        query,
+        results: results.map(r => ({
+          id: r.id,
+          title: r.title,
+          content: r.content,
+          similarity: r.similarity,
+          createdAt: r.createdAt
+        }))
+      });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/workspace/list') {
     sendJson(
       res,
