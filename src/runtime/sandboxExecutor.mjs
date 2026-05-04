@@ -15,7 +15,7 @@ export class JavaScriptSandbox {
         log: (...args) => { output.stdout += args.map(String).join(' ') + '\n'; },
         error: (...args) => { output.stderr += args.map(String).join(' ') + '\n'; },
         warn: (...args) => { output.stdout += '[warn] ' + args.map(String).join(' ') + '\n'; },
-        info: (...args) { output.stdout += args.map(String).join(' ') + '\n'; }
+        info: (...args) => { output.stdout += args.map(String).join(' ') + '\n'; }
       },
       JSON,
       Math,

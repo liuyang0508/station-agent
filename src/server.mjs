@@ -27,12 +27,14 @@ import { WorkspaceWatcher } from './lib/fileWatcher.mjs';
 import { PluginManager, createPluginScaffold } from './lib/pluginSystem.mjs';
 import { TaskScheduler } from './lib/taskScheduler.mjs';
 import { RollbackManager } from './lib/rollbackManager.mjs';
+import { SkillSyncManager } from './lib/skillSyncManager.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const publicDir = path.join(projectRoot, 'public');
 const store = new JsonStore();
+const skillSyncManager = new SkillSyncManager({ store, dataDir: path.join(projectRoot, 'data') });
 const mcpManager = new McpManager({ store });
 const subagentManager = new SubagentManager({ store, settings: store.getSettings() });
 const workspaceWatcher = new WorkspaceWatcher({ store });
@@ -46,6 +48,40 @@ const runs = new Map();
 const runCancellers = new Map();
 const fileChangeSubscribers = new Set();
 const startedAt = new Date();
+
+function detectMemoryTrigger(content, role) {
+  // Only detect user messages
+  if (role !== 'user') return null;
+
+  // Detect trigger words
+  const triggers = [
+    { pattern: /记住.*/i, extractTitle: (c) => c.replace(/记住/gi, '').trim() },
+    { pattern: /save to memory/i, extractTitle: () => '用户保存的记忆' },
+    { pattern: /沉淀到记忆/i, extractTitle: (c) => c.replace(/沉淀到记忆/gi, '').trim() }
+  ];
+
+  for (const trigger of triggers) {
+    const match = content.match(trigger.pattern);
+    if (match) {
+      // Check for duplicate by content similarity
+      const existingMemories = store.listMemories();
+      const isDuplicate = existingMemories.some(m =>
+        m.content === content || m.title === trigger.extractTitle(content)
+      );
+      if (isDuplicate) {
+        return null;
+      }
+
+      return {
+        title: trigger.extractTitle(content),
+        content: content,
+        tags: ['auto', 'user-request'],
+        source: 'auto:user-request'
+      };
+    }
+  }
+  return null;
+}
 
 function loadBuildInfo() {
   const buildInfoPath = path.join(projectRoot, 'build-info.json');
@@ -396,6 +432,17 @@ async function handleApi(req, res) {
       return;
     }
     store.addMessage({ sessionId: session.id, role: 'user', content: prompt });
+
+    // Auto-write memory if trigger detected
+    const memoryTrigger = detectMemoryTrigger(prompt, 'user');
+    if (memoryTrigger) {
+      try {
+        store.createMemory(memoryTrigger);
+      } catch (err) {
+        // Silently ignore duplicate or invalid memory
+      }
+    }
+
     const run = {
       id: randomUUID(),
       sessionId: session.id,
@@ -1113,9 +1160,27 @@ async function handleApi(req, res) {
     return;
   }
 
-  notFound(res);
+  // Skill sync routes
+  if (req.method === 'POST' && url.pathname === '/api/skills/sync') {
+    try {
+      const result = await skillSyncManager.syncAll();
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
 
-function createServer() {
+  if (req.method === 'GET' && url.pathname === '/api/skills/sync-status') {
+    sendJson(res, 200, skillSyncManager.getStatus());
+    return;
+  }
+
+  // Default: 404
+  notFound(res);
+}
+
+  function createServer() {
   return http.createServer(async (req, res) => {
     try {
       if (req.url.startsWith('/api/')) {
@@ -1135,6 +1200,11 @@ if (args.doctor) {
   console.log(JSON.stringify(healthSnapshot(), null, 2));
   process.exit(0);
 }
+
+// Skill sync on startup (non-blocking)
+skillSyncManager.syncAll().catch(err => {
+  console.warn('Skill sync failed (non-critical):', err.message);
+});
 
 createServer().listen(args.port, '127.0.0.1', () => {
   console.log(`AIAgent Client running at http://127.0.0.1:${args.port}`);

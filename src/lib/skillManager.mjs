@@ -3,6 +3,12 @@ import path from 'node:path';
 import { runReadOnlyCommand } from './commandRunner.mjs';
 import { validateWorkspacePath } from './safety.mjs';
 import { SandboxExecutor } from '../runtime/sandboxExecutor.mjs';
+import {
+  parseSoulMarkdown,
+  parseAgentMarkdown,
+  parseSkillMarkdown,
+  detectSkillFormat
+} from './skillFormats.mjs';
 
 function readJsonIfExists(filePath) {
   if (!fs.existsSync(filePath)) return null;
@@ -33,6 +39,160 @@ function inferFromMarkdown(filePath) {
 
 function firstExisting(root, candidates) {
   return candidates.map((candidate) => path.join(root, candidate)).find((candidate) => fs.existsSync(candidate)) || '';
+}
+
+function parseYamlFrontmatter(content) {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!match) return { frontmatter: {}, body: content };
+
+  const frontmatter = {};
+  const lines = match[1].split('\n');
+  let currentKey = null;
+  let currentValue = null;
+
+  for (const line of lines) {
+    const keyMatch = line.match(/^(\w+(?:_\w+)*):\s*/);
+    if (keyMatch) {
+      if (currentKey) frontmatter[currentKey] = currentValue;
+      currentKey = keyMatch[1];
+      currentValue = line.slice(keyMatch[0].length).trim();
+    } else if (line.match(/^\s+-/) && currentKey) {
+      const value = line.replace(/^\s+-\s*/, '').trim();
+      if (Array.isArray(frontmatter[currentKey])) {
+        frontmatter[currentKey].push(value);
+      } else {
+        frontmatter[currentKey] = [value];
+      }
+    }
+  }
+  if (currentKey) frontmatter[currentKey] = currentValue;
+
+  return {
+    frontmatter,
+    body: content.slice(match[0].length).trim()
+  };
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function extractSkillFromFile(filePath, repoName = '', relativePath = '') {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Skill file not found: ${filePath}`);
+  }
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  const format = detectSkillFormat(content);
+
+  let parsed;
+  switch (format) {
+    case 'SOUL.md':
+      parsed = parseSoulMarkdown(content);
+      break;
+    case 'AGENT.md':
+      parsed = parseAgentMarkdown(content);
+      break;
+    case 'MEMORY.md':
+      parsed = parseSkillMarkdown(content);
+      break;
+    default:
+      parsed = parseSkillMarkdown(content);
+  }
+
+  const { frontmatter, body } = parseYamlFrontmatter(content);
+
+  return {
+    name: frontmatter.name || parsed.name || path.basename(filePath, path.extname(filePath)),
+    description: frontmatter.description || parsed.description || body.slice(0, 200),
+    source: frontmatter.source || `external:github/${repoName}`,
+    entrypoint: frontmatter.entrypoint || parsed.entrypoint || '',
+    command: frontmatter.command || '',
+    args: frontmatter.args || [],
+    metadata: {
+      format,
+      repo: repoName,
+      repoPath: relativePath,
+      body,
+      frontmatter,
+      syncedAt: now()
+    },
+    enabled: true
+  };
+}
+
+export function installSkillFromFile({ store, skillPath, metadata = {} }) {
+  if (!fs.existsSync(skillPath)) {
+    throw new Error(`Skill file not found: ${skillPath}`);
+  }
+
+  const repoName = metadata.repoName || '';
+  const relativePath = metadata.relativePath || path.basename(skillPath);
+
+  const skillData = extractSkillFromFile(skillPath, repoName, relativePath);
+
+  // Check if skill with same source + name already exists, update if so
+  const existingSkills = store.listSkills();
+  const existing = existingSkills.find(
+    (s) => s.source === skillData.source && s.name === skillData.name
+  );
+
+  if (existing) {
+    return store.updateSkill(existing.id, {
+      description: skillData.description,
+      entrypoint: skillData.entrypoint,
+      command: skillData.command,
+      args: skillData.args,
+      metadata: { ...existing.metadata, ...skillData.metadata }
+    });
+  }
+
+  return store.installSkill(skillData);
+}
+
+export function installSkillFromDir({ store, dirPath, metadata = {} }) {
+  if (!fs.existsSync(dirPath)) {
+    throw new Error(`Skill directory not found: ${dirPath}`);
+  }
+
+  const stat = fs.statSync(dirPath);
+  if (!stat.isDirectory()) {
+    throw new Error(`Expected directory path: ${dirPath}`);
+  }
+
+  const repoName = metadata.repoName || path.basename(dirPath);
+
+  const skillFiles = [
+    { name: 'SKILL.md', format: 'SKILL.md' },
+    { name: 'SOUL.md', format: 'SOUL.md' },
+    { name: 'AGENT.md', format: 'AGENT.md' },
+    { name: 'MEMORY.md', format: 'MEMORY.md' },
+    { name: 'CLAUDE.md', format: 'CLAUDE.md' }
+  ];
+
+  const installed = [];
+  const errors = [];
+
+  for (const { name: fileName } of skillFiles) {
+    const filePath = path.join(dirPath, fileName);
+    if (fs.existsSync(filePath)) {
+      try {
+        const skill = installSkillFromFile({
+          store,
+          skillPath: filePath,
+          metadata: {
+            repoName,
+            relativePath: fileName
+          }
+        });
+        installed.push(skill);
+      } catch (err) {
+        errors.push({ file: fileName, error: err.message });
+      }
+    }
+  }
+
+  return { installed, errors };
 }
 
 export function installSkillFromWorkspace({ store, settings, payload }) {
