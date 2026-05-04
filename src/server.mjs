@@ -15,7 +15,7 @@ import { deleteModelApiKey, readModelApiKey, writeModelApiKey } from './lib/secr
 import { exportSessionJson, exportSessionMarkdown } from './lib/sessionExport.mjs';
 import { installSkillFromWorkspace, runSkill } from './lib/skillManager.mjs';
 import { listWorkspaceDirectory, readWorkspaceFile } from './lib/workspace.mjs';
-import { runAgentTurn } from './runtime/agentRuntime.mjs';
+import { runAgentTurn, agentLoop } from './runtime/agentRuntime.mjs';
 import { setPythonSidecar } from './runtime/toolRegistry.mjs';
 import { parseSkillMarkdown } from './lib/skillFormats.mjs';
 import { SkillEvolution, createSkillEvolution } from './lib/skillEvolution.mjs';
@@ -1442,6 +1442,50 @@ async function handleApi(req, res) {
       res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
     }
     res.end();
+    return;
+  }
+
+  // GET /api/agent/loop/status - 获取循环状态
+  if (req.method === 'GET' && url.pathname === '/api/agent/loop/status') {
+    try {
+      const status = agentLoop.getStatus();
+      sendJson(res, 200, { success: true, ...status });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/agent/loop/start - 启动循环
+  if (req.method === 'POST' && url.pathname === '/api/agent/loop/start') {
+    try {
+      agentLoop.start();
+      sendJson(res, 200, { success: true, state: agentLoop.state });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/agent/loop/stop - 停止循环
+  if (req.method === 'POST' && url.pathname === '/api/agent/loop/stop') {
+    try {
+      agentLoop.stop();
+      sendJson(res, 200, { success: true, state: agentLoop.state });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/agent/loop/pause - 暂停循环
+  if (req.method === 'POST' && url.pathname === '/api/agent/loop/pause') {
+    try {
+      agentLoop.pause();
+      sendJson(res, 200, { success: true, state: agentLoop.state });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
     return;
   }
 
