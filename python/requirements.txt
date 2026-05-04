@@ -1,0 +1,4 @@
+# Python Agent Core dependencies
+# Install with: pip install -r requirements.txt
+
+numpy>=1.24.0
