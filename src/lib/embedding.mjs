@@ -3,7 +3,8 @@
  * 使用词频统计生成伪向量，支持 cosine 相似度计算
  */
 
-import { cosine } from 'ml-distance';
+import pkg from 'ml-distance';
+const { cosine } = pkg.similarity;
 
 const DIM = 128; // 向量维度
 
