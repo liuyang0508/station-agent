@@ -40,6 +40,23 @@ const publicDir = path.join(projectRoot, 'public');
 const store = new JsonStore();
 const skillSyncManager = new SkillSyncManager({ store, dataDir: path.join(projectRoot, 'data') });
 const mcpManager = new McpManager({ store });
+// Auto-register filesystem MCP server if not already configured
+const existingServers = store.listMcpServers();
+const hasFilesystem = existingServers.some(s => s.name === 'filesystem');
+if (!hasFilesystem) {
+  try {
+    store.createMcpServer({
+      name: 'Filesystem MCP',
+      command: 'node',
+      args: [path.join(projectRoot, 'node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'), path.join(projectRoot, 'public')],
+      cwd: projectRoot,
+      env: {},
+      enabled: true
+    });
+  } catch (e) {
+    console.warn('Failed to register filesystem MCP server:', e.message);
+  }
+}
 const subagentManager = new SubagentManager({ store, settings: store.getSettings() });
 const workspaceWatcher = new WorkspaceWatcher({ store });
 const pluginManager = new PluginManager({ store, settings: store.getSettings() });
@@ -56,6 +73,7 @@ const pythonBridge = new PythonBridge({
   timeoutMs: 60000
 });
 const skillEvolution = createSkillEvolution(store);
+const skillCache = new SkillCache(store);
 const runs = new Map();
 const runCancellers = new Map();
 const fileChangeSubscribers = new Set();
@@ -624,6 +642,69 @@ async function handleApi(req, res) {
       sendJson(res, 200, parsed);
     } catch (error) {
       sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/skills/cache/status - 获取缓存状态
+  if (req.method === 'GET' && url.pathname === '/api/skills/cache/status') {
+    try {
+      const status = skillCache.getStatus();
+      sendJson(res, 200, { success: true, ...status });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/skills/cache/warm - 预热 skill
+  if (req.method === 'POST' && url.pathname === '/api/skills/cache/warm') {
+    try {
+      const body = await parseJson(req);
+      const { skillId } = body;
+      if (skillId) {
+        await skillCache.warmSkill(skillId);
+        sendJson(res, 200, { success: true, warmed: skillId });
+      } else {
+        const result = await skillCache.warmAll();
+        sendJson(res, 200, { success: true, ...result });
+      }
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/skills/cache/clear - 清空内存缓存
+  if (req.method === 'POST' && url.pathname === '/api/skills/cache/clear') {
+    try {
+      const result = skillCache.clearMemoryCache();
+      sendJson(res, 200, { success: true, ...result });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/skills/:id/content - 获取 skill 完整内容
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'content') {
+    try {
+      const skill = await skillCache.getSkill(parts[2]);
+      if (!skill) {
+        sendJson(res, 404, { error: 'Skill not found' });
+        return;
+      }
+      sendJson(res, 200, {
+        success: true,
+        skill: {
+          id: skill.id,
+          name: skill.name,
+          content: skill.content,
+          format: skill.format
+        }
+      });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
     }
     return;
   }
@@ -1405,4 +1486,13 @@ process.on('exit', () => pythonSidecar.stop());
 createServer().listen(args.port, '127.0.0.1', () => {
   console.log(`AIAgent Client running at http://127.0.0.1:${args.port}`);
   taskScheduler.start();
+
+  // Auto-start enabled MCP servers
+  for (const server of store.listMcpServers()) {
+    if (server.enabled && server.status !== 'running') {
+      mcpManager.start(server.id).catch(err => {
+        console.warn(`MCP server ${server.name} start failed:`, err.message);
+      });
+    }
+  }
 });
