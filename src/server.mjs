@@ -1489,6 +1489,65 @@ async function handleApi(req, res) {
     return;
   }
 
+  // Harness routes
+  let harness;
+  try {
+    const { Harness } = await import('./runtime/harness.mjs');
+    harness = new Harness({ maxSnapshots: 10 });
+  } catch {
+    harness = null;
+  }
+
+  // GET /api/harness/status - 获取 harness 状态
+  if (req.method === 'GET' && url.pathname === '/api/harness/status') {
+    try {
+      const status = harness.getStatus();
+      sendJson(res, 200, { success: true, ...status });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/harness/checkpoint - 创建检查点
+  if (req.method === 'POST' && url.pathname === '/api/harness/checkpoint') {
+    try {
+      const { state, label, metadata } = await parseJson(req);
+      const checkpointId = harness.saveCheckpoint(state, label, metadata);
+      sendJson(res, 200, { success: true, checkpointId });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/harness/rollback - 回滚
+  if (req.method === 'POST' && url.pathname === '/api/harness/rollback') {
+    try {
+      const { checkpointId } = await parseJson(req);
+      const state = harness.rollbackTo(checkpointId);
+      if (state) {
+        sendJson(res, 200, { success: true, state });
+      } else {
+        sendJson(res, 404, { error: 'Checkpoint not found' });
+      }
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/harness/constraints - 获取约束列表
+  if (req.method === 'GET' && url.pathname === '/api/harness/constraints') {
+    try {
+      const constraints = harness.enforcer.list();
+      sendJson(res, 200, { success: true, constraints });
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
   // Default: 404
   notFound(res);
 }
