@@ -6,6 +6,14 @@ import { OpenClawGatewayAdapter } from './adapters/OpenClawGatewayAdapter.mjs';
 import { OpenCoworkSandboxAdapter } from './adapters/OpenCoworkSandboxAdapter.mjs';
 import { referenceBlueprint } from '../lib/referenceBlueprint.mjs';
 import { createToolRegistry } from './toolRegistry.mjs';
+import { AgentLoop } from './agentLoop.mjs';
+
+const agentLoop = new AgentLoop({
+  maxIterations: 100,
+  loopThreshold: 3,
+  autoContinue: true,
+  contextThreshold: 0.8
+});
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
