@@ -31,6 +31,7 @@ import { TaskScheduler } from './lib/taskScheduler.mjs';
 import { RollbackManager } from './lib/rollbackManager.mjs';
 import { SkillSyncManager } from './lib/skillSyncManager.mjs';
 import { PythonBridge } from './runtime/pythonBridge.mjs';
+import { generateEmbedding } from './lib/embedding.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -447,7 +448,15 @@ async function handleApi(req, res) {
     const memoryTrigger = detectMemoryTrigger(prompt, 'user');
     if (memoryTrigger) {
       try {
-        store.createMemory(memoryTrigger);
+        const memory = store.createMemory(memoryTrigger);
+        // Async generate embedding, don't block response
+        generateEmbedding(memoryTrigger.content).then(embedding => {
+          if (store.createMemoryEmbedding && memory.id) {
+            store.createMemoryEmbedding(memory.id, Array.from(embedding));
+          }
+        }).catch(err => {
+          console.error('Failed to generate embedding:', err);
+        });
       } catch (err) {
         // Silently ignore duplicate or invalid memory
       }
