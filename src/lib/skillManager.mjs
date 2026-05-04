@@ -10,6 +10,7 @@ import {
   detectSkillFormat
 } from './skillFormats.mjs';
 import { createSkillEvolution } from './skillEvolution.mjs';
+import { SkillCache } from './skillCache.mjs';
 
 function readJsonIfExists(filePath) {
   if (!fs.existsSync(filePath)) return null;
@@ -139,16 +140,26 @@ export function installSkillFromFile({ store, skillPath, metadata = {} }) {
   );
 
   if (existing) {
-    return store.updateSkill(existing.id, {
+    const updated = store.updateSkill(existing.id, {
       description: skillData.description,
       entrypoint: skillData.entrypoint,
       command: skillData.command,
       args: skillData.args,
       metadata: { ...existing.metadata, ...skillData.metadata }
     });
+    // Cache to SQLite
+    if (store.cacheSkill) {
+      store.cacheSkill(updated);
+    }
+    return updated;
   }
 
-  return store.installSkill(skillData);
+  const skill = store.installSkill(skillData);
+  // Cache to SQLite
+  if (store.cacheSkill) {
+    store.cacheSkill(skill);
+  }
+  return skill;
 }
 
 export function installSkillFromDir({ store, dirPath, metadata = {} }) {
@@ -186,6 +197,10 @@ export function installSkillFromDir({ store, dirPath, metadata = {} }) {
             relativePath: fileName
           }
         });
+        // Cache to SQLite
+        if (store.cacheSkill) {
+          store.cacheSkill(skill);
+        }
         installed.push(skill);
       } catch (err) {
         errors.push({ file: fileName, error: err.message });
@@ -274,6 +289,10 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
   if (!skill.enabled) {
     throw new Error('技能未启用');
   }
+
+  // Ensure skill is cached
+  const skillCache = new SkillCache(store);
+  await skillCache.getSkill(skillId);
 
   const skillEvolution = createSkillEvolution(store);
 
