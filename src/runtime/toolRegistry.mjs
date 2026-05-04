@@ -37,7 +37,7 @@ function safeReadFile(workspaceRoot, relativePath, maxBytes = 512 * 1024) {
   };
 }
 
-export function createToolRegistry({ settings, mcpTools = [] }) {
+export function createToolRegistry({ settings, mcpTools = [], skills = [] }) {
   const tools = new Map();
 
   tools.set('workspace.list', {
@@ -203,6 +203,30 @@ export function createToolRegistry({ settings, mcpTools = [] }) {
         description: tool.description || 'MCP tool',
         params: { type: 'object', properties: {} },
         run: () => ({ error: 'MCP tool must be called via MCP manager' })
+      });
+    }
+  }
+
+  // Register skills as tools
+  for (const skill of skills) {
+    if (!tools.has(skill.name)) {
+      const isExecutable = !!(skill.entrypoint || skill.command);
+      tools.set(skill.name, {
+        name: skill.name,
+        description: skill.description || `Skill: ${skill.name}`,
+        params: {
+          type: 'object',
+          properties: {
+            context: { type: 'object', description: 'Execution context for the skill' }
+          }
+        },
+        run(args = {}) {
+          if (!isExecutable) {
+            return { error: `Skill "${skill.name}" is not directly executable. It provides guidelines injected into the system prompt.` };
+          }
+          return { error: `Skill execution not yet implemented for "${skill.name}". Entry point: ${skill.entrypoint || 'none'}` };
+        },
+        _skill: skill // preserve raw skill data
       });
     }
   }

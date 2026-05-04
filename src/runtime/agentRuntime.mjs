@@ -80,7 +80,7 @@ export function createAgentRuntime(settings, { skills, memories, tools, mcpTools
 
 export async function* runAgentTurn(context) {
   const { prompt, session, history, settings, skills, connectors, memories = [], mcpTools = [] } = context;
-  const tools = createToolRegistry({ settings, mcpTools });
+  const tools = createToolRegistry({ settings, mcpTools, skills });
 
   // Add tools to context for adapters
   const runtimeContext = { ...context, tools };
