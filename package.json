@@ -39,6 +39,7 @@
     "url": "https://github.com/your-org/station-agent"
   },
   "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "^2026.1.14",
     "better-sqlite3": "^11.10.0",
     "jszip": "^3.10.1",
     "ml-distance": "^4.0.1"

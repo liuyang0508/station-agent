@@ -47,6 +47,27 @@ export function setPythonSidecar(sidecar) {
 export function createToolRegistry({ settings, mcpTools = [], skills = [] }) {
   const tools = new Map();
 
+  // Augment skills with Python sidecar skills (from pre-synced cache)
+  if (_pythonSidecar) {
+    try {
+      const pySkills = _pythonSidecar._getLoadedSkillNames?.() || [];
+      for (const pySkill of pySkills) {
+        if (!skills.find(s => s.name === pySkill.name)) {
+          skills.push({
+            id: `python:${pySkill.name}`,
+            name: pySkill.name,
+            description: pySkill.description || `Python skill: ${pySkill.name}`,
+            enabled: true,
+            source: 'python:sidecar',
+            metadata: { module: pySkill.module, source: 'python' }
+          });
+        }
+      }
+    } catch (_) {
+      // Python sidecar not ready
+    }
+  }
+
   tools.set('workspace.list', {
     name: 'workspace.list',
     description: '列出工作区内的目录内容',
@@ -217,7 +238,11 @@ export function createToolRegistry({ settings, mcpTools = [], skills = [] }) {
   // Register skills as tools
   for (const skill of skills) {
     if (!tools.has(skill.name)) {
-      const isExecutable = !!(skill.entrypoint || skill.command);
+      // Python-side skills (loaded via Python sidecar) are always executable
+      const isPythonSkill = (skill.source || '').includes('python') ||
+                           (skill.metadata?.source || '').includes('python') ||
+                           (skill.metadata?.module || '').includes('_skill');
+      const isExecutable = !!(skill.entrypoint || skill.command) || isPythonSkill;
       tools.set(skill.name, {
         name: skill.name,
         description: skill.description || `Skill: ${skill.name}`,

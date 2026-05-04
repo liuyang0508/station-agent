@@ -1522,6 +1522,7 @@ skillSyncManager.syncAll().catch(err => {
 // Start Python sidecar
 try {
   pythonSidecar.start();
+  pythonSidecar._syncLoadedSkills(); // populate skill cache before first tool registry use
 } catch (e) {
   console.warn('Python sidecar start failed:', e.message);
 }

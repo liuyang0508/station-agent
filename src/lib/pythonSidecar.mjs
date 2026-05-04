@@ -15,6 +15,7 @@ export class PythonSidecar {
   #requestId = 0;
   #pythonPath = null;
   #basePath = null;
+  #cachedSkillNames = []; // updated on each skillList/skillLoad call
 
   constructor(pythonPath = null, basePath = null) {
     this.#pythonPath = pythonPath || "python3";
@@ -85,6 +86,19 @@ export class PythonSidecar {
   }
 
   // ─── Skill API ────────────────────────────────────────────────
+
+  async _syncLoadedSkills() {
+    try {
+      const result = await this.#send("skill.list");
+      this.#cachedSkillNames = result.result ?? [];
+    } catch {
+      this.#cachedSkillNames = [];
+    }
+  }
+
+  _getLoadedSkillNames() {
+    return this.#cachedSkillNames;
+  }
 
   async skillLoad(path) {
     const result = await this.#send("skill.load", { path });

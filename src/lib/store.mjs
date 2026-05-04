@@ -415,6 +415,45 @@ export class JsonStore {
     return this.state.mcpServers;
   }
 
+  // ─── Skill Cache (in-memory, for SkillCache compatibility) ───
+  _ensureSkillCache() {
+    if (!this.state.skillCache) {
+      this.state.skillCache = [];
+    }
+  }
+
+  cacheSkill(skill) {
+    this._ensureSkillCache();
+    const idx = this.state.skillCache.findIndex(s => s.id === skill.id);
+    const entry = { ...skill, cachedAt: now(), lastAccessedAt: now(), accessCount: 0 };
+    if (idx >= 0) {
+      this.state.skillCache[idx] = entry;
+    } else {
+      this.state.skillCache.unshift(entry);
+    }
+    this.save();
+    return entry;
+  }
+
+  getSkillFromCache(skillId) {
+    this._ensureSkillCache();
+    return this.state.skillCache.find(s => s.id === skillId) || null;
+  }
+
+  updateSkillAccessTime(skillId) {
+    this._ensureSkillCache();
+    const entry = this.state.skillCache.find(s => s.id === skillId);
+    if (entry) {
+      entry.lastAccessedAt = now();
+      entry.accessCount = (entry.accessCount || 0) + 1;
+    }
+  }
+
+  getSkillCacheCount() {
+    this._ensureSkillCache();
+    return this.state.skillCache.length;
+  }
+
   getMcpServer(serverId) {
     return this.state.mcpServers.find((server) => server.id === serverId);
   }
