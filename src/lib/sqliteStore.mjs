@@ -171,6 +171,29 @@ export class SqliteStore {
         applied INTEGER DEFAULT 0,
         created_at TEXT
       );
+
+      -- Skill cache tables
+      CREATE TABLE IF NOT EXISTS skill_cache (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        source TEXT,
+        entrypoint TEXT,
+        command TEXT,
+        args TEXT,
+        metadata TEXT,
+        enabled INTEGER DEFAULT 1,
+        cached_at TEXT,
+        last_accessed_at TEXT,
+        access_count INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS skill_content (
+        skill_id TEXT PRIMARY KEY,
+        content TEXT,
+        format TEXT,
+        FOREIGN KEY (skill_id) REFERENCES skill_cache(id)
+      );
     `);
 
     return db;
@@ -639,6 +662,68 @@ export class SqliteStore {
       'SELECT * FROM skills WHERE LOWER(name) LIKE ? OR LOWER(description) LIKE ? LIMIT 20'
     ).all(like, like).map(this._mapSkill);
     return { query: q, sessions, messages, memories, skills };
+  }
+
+  // Skill Cache Methods
+  cacheSkill(skill) {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT OR REPLACE INTO skill_cache (id, name, description, source, entrypoint, command, args, metadata, enabled, cached_at, last_accessed_at, access_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      skill.id, skill.name, skill.description, skill.source || '',
+      skill.entrypoint || '', skill.command || '',
+      JSON.stringify(skill.args || []),
+      JSON.stringify(skill.metadata || {}),
+      skill.enabled ? 1 : 0,
+      now, now, 0
+    );
+
+    if (skill.metadata?.body) {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO skill_content (skill_id, content, format)
+        VALUES (?, ?, ?)
+      `).run(skill.id, skill.metadata.body, skill.metadata?.format || 'unknown');
+    }
+  }
+
+  getSkillFromCache(skillId) {
+    const row = this.db.prepare('SELECT * FROM skill_cache WHERE id = ?').get(skillId);
+    if (!row) return null;
+
+    const contentRow = this.db.prepare('SELECT * FROM skill_content WHERE skill_id = ?').get(skillId);
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      source: row.source,
+      entrypoint: row.entrypoint,
+      command: row.command,
+      args: row.args ? JSON.parse(row.args) : [],
+      metadata: row.metadata ? JSON.parse(row.metadata) : {},
+      enabled: Boolean(row.enabled),
+      cachedAt: row.cached_at,
+      lastAccessedAt: row.last_accessed_at,
+      accessCount: row.access_count,
+      content: contentRow?.content,
+      format: contentRow?.format
+    };
+  }
+
+  updateSkillAccessTime(skillId) {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE skill_cache SET last_accessed_at = ?, access_count = access_count + 1 WHERE id = ?
+    `).run(now, skillId);
+  }
+
+  getSkillCacheCount() {
+    const row = this.db.prepare('SELECT COUNT(*) as c FROM skill_cache').get();
+    return row?.c || 0;
+  }
+
+  getAllSkillMetadata() {
+    return this.db.prepare('SELECT id, name, description, source, enabled, cached_at, last_accessed_at, access_count FROM skill_cache ORDER BY access_count DESC').all();
   }
 
   migrateFromJsonStore(jsonStore) {
