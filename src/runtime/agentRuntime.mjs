@@ -7,15 +7,21 @@ import { OpenCoworkSandboxAdapter } from './adapters/OpenCoworkSandboxAdapter.mj
 import { referenceBlueprint } from '../lib/referenceBlueprint.mjs';
 import { createToolRegistry } from './toolRegistry.mjs';
 import { AgentLoop } from './agentLoop.mjs';
+import { Harness } from './harness.mjs';
 
-const agentLoop = new AgentLoop({
+export const agentLoop = new AgentLoop({
   maxIterations: 100,
   loopThreshold: 3,
   autoContinue: true,
   contextThreshold: 0.8
 });
 
-function wait(ms) {
+export const harness = new Harness({
+  enabled: true,
+  maxSnapshots: 10
+});
+
+export function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
