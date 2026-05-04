@@ -8,6 +8,9 @@ import { referenceBlueprint } from '../lib/referenceBlueprint.mjs';
 import { createToolRegistry } from './toolRegistry.mjs';
 import { AgentLoop } from './agentLoop.mjs';
 import { Harness } from './harness.mjs';
+import { SkillCache } from '../lib/skillCache.mjs';
+import { createSkillEvolution } from '../lib/skillEvolution.mjs';
+import { JsonStore } from '../lib/store.mjs';
 
 export const agentLoop = new AgentLoop({
   maxIterations: 100,
@@ -75,6 +78,9 @@ export function createAgentRuntime(settings, { skills, memories, tools, mcpTools
   const isMiniMax = baseUrl.includes('minimax.io');
   const isOpenAI = baseUrl.includes('openai.com') || baseUrl.includes('azure.com');
 
+  // If baseUrl points to a real API and runtimeMode is demo, still use real runtime
+  const useRealRuntime = isMiniMax || isOpenAI || runtimeMode === 'remote' || runtimeMode === 'minimax' || runtimeMode === 'anthropic';
+
   switch (runtimeMode) {
     case 'hermes':
       return new HermesRuntime({ settings, skills, memories, tools });
@@ -95,6 +101,9 @@ export function createAgentRuntime(settings, { skills, memories, tools, mcpTools
       return new OpenAICompatibleRuntime({ settings, skills, memories, tools });
     case 'demo':
     default:
+      // For demo mode, use real runtime if baseUrl is configured
+      if (isMiniMax) return new MiniMaxRuntime({ settings, skills, memories, tools });
+      if (isOpenAI) return new OpenAICompatibleRuntime({ settings, skills, memories, tools });
       return new DemoRuntime({ settings, skills, memories, tools });
   }
 }
@@ -124,6 +133,20 @@ export async function* runAgentTurn(context) {
   // Create and run the appropriate runtime
   const runtime = createAgentRuntime(settings, { skills, memories, tools, mcpTools });
 
+  // 获取技能缓存和进化状态
+  let skillCacheStats = { sqliteSize: 0, memorySize: 0 };
+  let skillEvolutionStatus = null;
+  try {
+    const store = new JsonStore();
+    const sc = new SkillCache(store);
+    const cacheStatus = sc.getStatus ? sc.getStatus() : { sqliteSize: 0, memorySize: 0 };
+    skillCacheStats = { sqliteSize: cacheStatus.skillsInSQLite || 0, memorySize: cacheStatus.memoryCacheSize || 0 };
+    const se = createSkillEvolution(store);
+    skillEvolutionStatus = se.getStatus ? se.getStatus() : null;
+  } catch (e) {
+    // ignore
+  }
+
   yield {
     type: 'trace',
     title: '任务解析',
@@ -147,6 +170,46 @@ export async function* runAgentTurn(context) {
     status: 'ok'
   };
   await wait(160);
+
+  // Agent Loop 状态
+  const loopStatus = agentLoop.getStatus();
+  yield {
+    type: 'trace',
+    title: 'Agent Loop',
+    detail: `状态: ${loopStatus.state}, 迭代: ${loopStatus.iteration}/${loopStatus.maxIterations}, 自动继续: ${loopStatus.autoContinue}`,
+    status: 'ok'
+  };
+  await wait(80);
+
+  // Harness 状态
+  const harnessStatus = harness.getStatus();
+  yield {
+    type: 'trace',
+    title: 'Harness Engineering',
+    detail: `约束检查: ${harnessStatus.constraints.length} 条, 快照: ${harnessStatus.snapshots}, 启用: ${harnessStatus.enabled}`,
+    status: 'ok'
+  };
+  await wait(80);
+
+  // Skill Cache 状态
+  yield {
+    type: 'trace',
+    title: 'Skill Cache',
+    detail: `SQLite: ${skillCacheStats.sqliteSize}, Memory: ${skillCacheStats.memorySize}`,
+    status: 'ok'
+  };
+  await wait(80);
+
+  // Skill Evolution 状态
+  if (skillEvolutionStatus) {
+    yield {
+      type: 'trace',
+      title: 'Skill Evolution',
+      detail: `技能数: ${skillEvolutionStatus.totalSkills || 0}, 触发: ${skillEvolutionStatus.recentTriggers?.length || 0}`,
+      status: 'ok'
+    };
+    await wait(80);
+  }
 
   // Delegate to the runtime adapter
   for await (const event of runtime.runTurn(prompt, runtimeContext)) {

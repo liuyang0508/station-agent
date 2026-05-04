@@ -4,7 +4,7 @@
 
 AIAgent Client v0.1 骨架已实现基础功能（会话管理、只读命令执行、MCP 进程管理、技能中心、长期记忆），但 README 中的"下一阶段"功能尚未实现：
 - MCP stdio 协议（工具发现、工具调用回放）
-- Hermes CLI / OpenClaw Gateway / OpenCowork Sandbox 深度适配器
+- Hermes CLI / 多通道网关 / 沙箱执行器 深度适配器
 - SQLite 存储 + 向量检索
 - 可写命令细粒度审批与回滚
 - Windows WSL2 / macOS Lima / Linux 容器化执行器
@@ -53,8 +53,8 @@ POST /api/mcp/:id/discover    - 触发重新发现
 | Demo | `DemoRuntime.mjs` | 复用当前 `buildDemoAnswer()` |
 | OpenAI Compatible | `OpenAICompatibleRuntime.mjs` | 移动 `callOpenAICompatible()` |
 | Hermes | `HermesRuntime.mjs` | 通过 Unix Socket 连接 Hermes CLI |
-| OpenClaw | `OpenClawGatewayAdapter.mjs` | 连接 OpenClaw Gateway 多通道消息路由 |
-| OpenCowork | `OpenCoworkSandboxAdapter.mjs` | 操作 WSL2/Lima/Linux 容器 |
+| Gateway | `GatewayAdapter.mjs` | 连接多通道消息路由 |
+| Sandbox | `SandboxAdapter.mjs` | 操作 WSL2/Lima/Linux 容器 |
 
 ### 4.3 重构 `src/runtime/agentRuntime.mjs` 为工厂函数
 
@@ -160,8 +160,8 @@ GET  /api/commands/operations    - 列出可回滚操作
 - `src/runtime/adapters/DemoRuntime.mjs`
 - `src/runtime/adapters/OpenAICompatibleRuntime.mjs`
 - `src/runtime/adapters/HermesRuntime.mjs`
-- `src/runtime/adapters/OpenClawGatewayAdapter.mjs`
-- `src/runtime/adapters/OpenCoworkSandboxAdapter.mjs`
+- `src/runtime/adapters/GatewayAdapter.mjs`
+- `src/runtime/adapters/SandboxAdapter.mjs`
 - `src/lib/sqliteStore.mjs`
 - `src/lib/commandExecutor.mjs`
 - `src/lib/rollbackManager.mjs`

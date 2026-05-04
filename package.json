@@ -31,8 +31,8 @@
     "claude",
     "openai",
     "hermes",
-    "opencowork",
-    "openclaw"
+    "gateway",
+    "sandbox"
   ],
   "repository": {
     "type": "git",

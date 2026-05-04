@@ -4,7 +4,7 @@ Station Agent is a local-first AI Agent desktop client with multi-platform GUI a
 
 ## Project Overview
 
-A cross-platform desktop application that serves as a local AI Agent client, with support for multiple runtimes (OpenAI-compatible API, Hermes, OpenClaw, OpenCowork sandbox) and MCP protocol for extensibility.
+A cross-platform desktop application that serves as a local AI Agent client, with support for multiple runtimes (OpenAI-compatible API, CLI, sandbox) and MCP protocol for extensibility.
 
 ## Technology Stack
 
@@ -29,7 +29,7 @@ npm test           # Run tests
 public/              # Web UI (HTML/CSS/JS)
 src/
   ├── server.mjs     # HTTP control plane API
-  ├── runtime/       # Agent runtime adapters (demo, remote, hermes, openclaw, opencowork)
+  ├── runtime/       # Agent runtime adapters (demo, remote, hermes, gateway, sandbox)
   └── lib/           # Core libraries
 macos/               # macOS native shell (Swift)
 scripts/             # Build scripts
@@ -53,8 +53,8 @@ docs/                # Architecture and design docs
 | `demo` | DemoRuntime | Local demo, no API key |
 | `remote` | OpenAICompatibleRuntime | OpenAI-compatible API |
 | `hermes` | HermesRuntime | Hermes CLI |
-| `openclaw` | OpenClawGatewayAdapter | OpenClaw Gateway |
-| `opencowork` | OpenCoworkSandboxAdapter | WSL2/Lima/Docker sandbox |
+| `gateway` | GatewayAdapter | 多通道消息网关 |
+| `sandbox` | SandboxAdapter | WSL2/Lima/Docker 沙箱 |
 
 ## Key Conventions
 

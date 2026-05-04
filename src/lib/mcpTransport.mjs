@@ -44,64 +44,75 @@ export class McpTransport {
 
   /**
    * Process buffer to extract complete messages
+   * Supports both MCP Content-Length framing and JSON-Lines format
    */
   _processBuffer() {
     while (this.buffer.length > 0) {
-      // Look for Content-Length header
+      // Try MCP Content-Length framing first
       const headerEnd = this.buffer.indexOf(HEADER_SEPARATOR);
-      if (headerEnd === -1) {
-        // Incomplete header, wait for more data
-        break;
+      if (headerEnd !== -1) {
+        const headerStr = this.buffer.slice(0, headerEnd);
+        const contentLengthMatch = headerStr.match(/Content-Length: (\d+)/i);
+
+        if (contentLengthMatch) {
+          const contentLength = parseInt(contentLengthMatch[1], 10);
+          const bodyStart = headerEnd + HEADER_SEPARATOR.length;
+
+          if (this.buffer.length >= bodyStart + contentLength) {
+            const body = this.buffer.slice(bodyStart, bodyStart + contentLength);
+            this.buffer = this.buffer.slice(bodyStart + contentLength);
+
+            try {
+              const message = JSON.parse(body);
+              if (this.messageHandler) {
+                this.messageHandler(message);
+              }
+            } catch (error) {
+              console.error('Failed to parse MCP message:', error.message);
+            }
+            continue;
+          }
+        }
       }
 
-      const headerStr = this.buffer.slice(0, headerEnd);
-      const contentLengthMatch = headerStr.match(/Content-Length: (\d+)/i);
+      // Try JSON-Lines format (newline-delimited JSON)
+      const newlineIndex = this.buffer.indexOf('\n');
+      if (newlineIndex !== -1) {
+        const line = this.buffer.slice(0, newlineIndex).trim();
+        this.buffer = this.buffer.slice(newlineIndex + 1);
 
-      if (!contentLengthMatch) {
-        // Malformed header, skip this and try to find next header
-        this.buffer = this.buffer.slice(headerEnd + HEADER_SEPARATOR.length);
+        if (line.startsWith('{') && line.endsWith('}')) {
+          try {
+            const message = JSON.parse(line);
+            if (this.messageHandler) {
+              this.messageHandler(message);
+            }
+          } catch (error) {
+            // Not JSON, skip
+          }
+        }
         continue;
       }
 
-      const contentLength = parseInt(contentLengthMatch[1], 10);
-      const bodyStart = headerEnd + HEADER_SEPARATOR.length;
-
-      if (this.buffer.length < bodyStart + contentLength) {
-        // Incomplete message, wait for more data
-        break;
-      }
-
-      // Extract complete message
-      const body = this.buffer.slice(bodyStart, bodyStart + contentLength);
-      this.buffer = this.buffer.slice(bodyStart + contentLength);
-
-      // Parse and handle message
-      try {
-        const message = JSON.parse(body);
-        if (this.messageHandler) {
-          this.messageHandler(message);
-        }
-      } catch (error) {
-        console.error('Failed to parse MCP message:', error.message);
-      }
+      // No complete message found, wait for more data
+      break;
     }
   }
 
   /**
    * Send a JSON-RPC message
+   * Uses JSON-Lines format (\n terminated) for better compatibility with spawned processes
    */
   send(message) {
     if (this.closed) {
       throw new Error('Transport is closed');
     }
 
-    const body = JSON.stringify(message);
-    const contentLength = Buffer.byteLength(body, 'utf8');
-    const frame = `${CONTENT_LENGTH_HEADER}${contentLength}${HEADER_SEPARATOR}${body}`;
+    const body = JSON.stringify(message) + '\n';
 
     return new Promise((resolve, reject) => {
       if (this.stdin && typeof this.stdin.write === 'function') {
-        const ok = this.stdin.write(frame, 'utf8', (error) => {
+        const ok = this.stdin.write(body, 'utf8', (error) => {
           if (error) {
             reject(error);
           } else {

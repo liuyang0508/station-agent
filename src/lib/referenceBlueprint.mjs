@@ -3,8 +3,6 @@ export const referenceBlueprint = {
   positioning: '本地优先的专业 AI Agent 客户端，面向个人和团队的自动化工作台。',
   references: [
     {
-      repo: 'OpenCoworkAI/open-cowork',
-      localPath: '../open-cowork',
       role: '桌面客户端、会话管理、沙箱、MCP、技能与远控的产品参考',
       adopted: [
         '工作区优先的会话模型',
@@ -13,8 +11,6 @@ export const referenceBlueprint = {
       ]
     },
     {
-      repo: 'openclaw/openclaw',
-      localPath: '../open-claw',
       role: '多通道网关、设备节点、插件 SDK、消息路由的架构参考',
       adopted: [
         'Gateway 作为会话、通道、设备和自动化的控制面',
@@ -23,8 +19,6 @@ export const referenceBlueprint = {
       ]
     },
     {
-      repo: 'NousResearch/hermes-agent',
-      localPath: '../hermes-agent/code',
       role: '工具注册、技能自进化、记忆、定时任务、多运行环境的运行时参考',
       adopted: [
         '工具元数据注册表',
@@ -38,37 +32,37 @@ export const referenceBlueprint = {
       id: 'local-first-chat',
       title: '本地优先对话工作台',
       status: 'ready',
-      source: 'OpenCowork session model + Hermes CLI ergonomics'
+      source: '会话模型 + CLI  ergonomics'
     },
     {
       id: 'runtime-adapter',
       title: '可替换 Agent Runtime',
       status: 'ready',
-      source: 'Hermes runtime/provider split'
+      source: 'runtime/provider split'
     },
     {
       id: 'skills',
       title: '技能中心',
       status: 'ready',
-      source: 'OpenCowork skills + Hermes tool registry'
+      source: 'skills + tool registry'
     },
     {
       id: 'gateway',
       title: '远程控制与多通道网关',
       status: 'scaffolded',
-      source: 'OpenClaw gateway/channel architecture'
+      source: 'gateway/channel architecture'
     },
     {
       id: 'sandbox',
       title: '工作区安全边界',
       status: 'ready',
-      source: 'OpenCowork path guard'
+      source: 'path guard'
     },
     {
       id: 'automation',
       title: '任务编排与计划执行',
       status: 'scaffolded',
-      source: 'Hermes cron + OpenClaw automation'
+      source: 'cron + automation'
     }
   ],
   runtimePrinciples: [
@@ -82,7 +76,6 @@ export const referenceBlueprint = {
 
 export function summarizeReferences() {
   return referenceBlueprint.references.map((item) => ({
-    repo: item.repo,
     role: item.role,
     adopted: item.adopted
   }));

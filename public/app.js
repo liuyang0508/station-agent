@@ -616,6 +616,19 @@ async function sendPrompt(prompt) {
   state.sending = true;
   state.trace = [];
   thinkingContent = '';
+
+  // Show thinking panel with pending indicator
+  const thinkEl = $('#thinkingContent');
+  if (thinkEl) {
+    thinkingContent = '正在分析任务...\n';
+    thinkEl.textContent = thinkingContent;
+    thinkEl.classList.add('visible');
+  }
+
+  // Add pending trace to show activity
+  state.trace.push({ title: '等待响应', detail: '正在连接 Agent 运行时...', status: 'running' });
+  renderTrace();
+
   state.messages.push({
     id: `local-${Date.now()}`,
     role: 'user',
@@ -639,7 +652,9 @@ async function sendPrompt(prompt) {
       thinkingContent += event.detail;
       const thinkEl = $('#thinkingContent');
       if (thinkEl) {
-        thinkEl.textContent = thinkingContent;
+        // Keep initial message if present
+        const initialMsg = thinkingContent.startsWith('正在分析任务') ? '' : '正在分析任务...\n';
+        thinkEl.textContent = initialMsg + thinkingContent;
         thinkEl.classList.toggle('visible', thinkingContent.length > 0);
       }
     } else if (event.type === 'trace' || event.type === 'tool') {
@@ -665,6 +680,18 @@ async function sendPrompt(prompt) {
       state.commandOutput = (state.commandOutput || '') + event.delta;
       $('#terminalOutput').textContent = state.commandOutput;
       $('#terminalOutput').classList.add('active');
+    } else if (event.type === 'done') {
+      // Safety net: close SSE and reset state if runtime signals done
+      events.close();
+      state.currentRunId = null;
+      thinkingContent = '';
+      const thinkEl = $('#thinkingContent');
+      if (thinkEl) thinkEl.classList.remove('visible');
+      state.messages = await api(`/api/sessions/${state.activeSessionId}/messages`);
+      state.sessions = await api('/api/sessions');
+      state.health = await api('/api/health');
+      state.sending = false;
+      render();
     }
   };
 

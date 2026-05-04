@@ -12,17 +12,20 @@ class ToolRegistry:
     def register(self, name: str, handler: Callable, description: str = ''):
         """Register a tool."""
         self._tools[name] = handler
-        setattr(handler, '_tool_name', name)
-        setattr(handler, '_tool_description', description)
+        # Store metadata separately instead of on the handler
+        if not hasattr(self, '_tool_metadata'):
+            self._tool_metadata = {}
+        self._tool_metadata[name] = {'description': description}
 
     def list_tools(self) -> list[dict]:
         """List all registered tools."""
+        metadata = getattr(self, '_tool_metadata', {})
         return [
             {
                 'name': name,
-                'description': getattr(func, '_tool_description', '')
+                'description': metadata.get(name, {}).get('description', '')
             }
-            for name, func in self._tools.items()
+            for name in self._tools
         ]
 
     def execute(self, tool_call: dict) -> dict:

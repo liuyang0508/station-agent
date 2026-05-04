@@ -58,28 +58,28 @@ function createDefaultState() {
         name: '文档工坊',
         description: '生成和修订 PPTX、DOCX、XLSX、PDF 交付件。',
         enabled: true,
-        source: 'OpenCowork skills'
+        source: 'builtin skills'
       },
       {
         id: 'workspace-operator',
         name: '工作区操作',
         description: '在受控工作区内读写文件、整理目录、生成报告。',
         enabled: true,
-        source: 'OpenCowork sandbox + Hermes file tools'
+        source: 'builtin sandbox + file tools'
       },
       {
         id: 'browser-research',
         name: '浏览器研究',
         description: '通过 MCP/浏览器连接器采集公开资料并沉淀引用。',
         enabled: false,
-        source: 'OpenClaw browser tools + MCP'
+        source: 'browser tools + MCP'
       },
       {
         id: 'memory-loop',
         name: '长期记忆',
         description: '把稳定偏好、项目知识和复盘结论沉淀为可检索上下文。',
         enabled: true,
-        source: 'Hermes memory'
+        source: 'builtin memory'
       }
     ],
     connectors: [
@@ -91,18 +91,25 @@ function createDefaultState() {
         source: 'workspace skills'
       },
       {
+        id: 'dingtalk',
+        name: '钉钉',
+        status: 'planned',
+        channel: 'mobile',
+        source: 'workspace skills'
+      },
+      {
         id: 'slack',
         name: 'Slack',
         status: 'planned',
         channel: 'remote',
-        source: 'OpenClaw channels'
+        source: 'channel integration'
       },
       {
         id: 'feishu',
         name: '飞书',
         status: 'planned',
         channel: 'remote',
-        source: 'OpenCowork remote control'
+        source: 'remote control'
       },
       {
         id: 'local-browser',
@@ -146,7 +153,7 @@ function createDefaultState() {
         env: {},
         enabled: false,
         status: 'stopped',
-        source: 'OpenClaw gateway pattern',
+        source: 'gateway pattern',
         createdAt: now(),
         updatedAt: now()
       }

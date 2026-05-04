@@ -1,11 +1,11 @@
 {
-  "lastFullSync": "2026-05-04T18:25:42.591Z",
+  "lastFullSync": "2026-05-04T19:34:31.249Z",
   "sources": [
     {
       "url": "https://github.com/forrestchang/andrej-karpathy-skills",
       "branch": "main",
       "lastCommit": null,
-      "lastSync": "2026-05-04T18:25:42.591Z",
+      "lastSync": "2026-05-04T19:34:31.249Z",
       "skillsInstalled": 2,
       "skillsBackedUp": 1
     },
@@ -13,7 +13,7 @@
       "url": "https://github.com/mattpocock/skills",
       "branch": "main",
       "lastCommit": null,
-      "lastSync": "2026-05-04T18:25:42.591Z",
+      "lastSync": "2026-05-04T19:34:31.249Z",
       "skillsInstalled": 22,
       "skillsBackedUp": 22
     }

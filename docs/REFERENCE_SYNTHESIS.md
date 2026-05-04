@@ -1,6 +1,6 @@
-# 参考仓库吸收点
+# 架构参考吸收点
 
-## OpenCoworkAI/open-cowork
+## 桌面客户端架构
 
 吸收方向：
 
@@ -14,7 +14,7 @@
 - `src/lib/store.mjs` 的 Session、Skill、Connector、Task、Approval 对象。
 - `src/lib/safety.mjs` 的路径和命令校验。
 
-## openclaw/openclaw
+## 多通道网关架构
 
 吸收方向：
 
@@ -28,7 +28,7 @@
 - `docs/ARCHITECTURE.md` 把 Gateway 作为下一阶段适配器。
 - UI 中保留连接器和安全策略两块一等入口。
 
-## NousResearch/hermes-agent
+## 工具注册与技能系统
 
 吸收方向：
 
@@ -40,4 +40,4 @@
 
 - `src/runtime/agentRuntime.mjs` 是稳定运行时接口。
 - `skills` 采用注册对象而不是硬编码按钮。
-- 后续 Hermes CLI 适配器可以接入同一运行流。
+- Runtime 适配器可接入同一运行流。

@@ -48,7 +48,7 @@ export class DemoRuntime extends AgentRuntimeAdapter {
     yield { type: 'trace', title: '安全边界', detail: `工作区边界已绑定到 ${session?.workspaceRoot || settings.workspaceRoot}`, status: 'ok' };
     await wait(160);
 
-    yield { type: 'tool', tool: 'reference.blueprint', status: 'ok', detail: '已加载 OpenCowork、OpenClaw、Hermes Agent 的产品架构映射。' };
+    yield { type: 'tool', tool: 'reference.blueprint', status: 'ok', detail: '已加载产品架构映射。' };
     await wait(160);
 
     yield { type: 'tool', tool: 'skills.registry', status: 'ok', detail: `启用 ${skills.filter((s) => s.enabled).length} 个技能，${skills.length} 个技能已注册。` };
