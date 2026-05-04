@@ -15,7 +15,7 @@ import { deleteModelApiKey, readModelApiKey, writeModelApiKey } from './lib/secr
 import { exportSessionJson, exportSessionMarkdown } from './lib/sessionExport.mjs';
 import { installSkillFromWorkspace, runSkill } from './lib/skillManager.mjs';
 import { listWorkspaceDirectory, readWorkspaceFile } from './lib/workspace.mjs';
-import { runAgentTurn, agentLoop } from './runtime/agentRuntime.mjs';
+import { runAgentTurn, agentLoop, harness } from './runtime/agentRuntime.mjs';
 import { setPythonSidecar } from './runtime/toolRegistry.mjs';
 import { parseSkillMarkdown } from './lib/skillFormats.mjs';
 import { SkillEvolution, createSkillEvolution } from './lib/skillEvolution.mjs';
@@ -1487,15 +1487,6 @@ async function handleApi(req, res) {
       sendJson(res, 500, { error: error.message });
     }
     return;
-  }
-
-  // Harness routes
-  let harness;
-  try {
-    const { Harness } = await import('./runtime/harness.mjs');
-    harness = new Harness({ maxSnapshots: 10 });
-  } catch {
-    harness = null;
   }
 
   // GET /api/harness/status - 获取 harness 状态
