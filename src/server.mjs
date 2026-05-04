@@ -32,6 +32,7 @@ import { RollbackManager } from './lib/rollbackManager.mjs';
 import { SkillSyncManager } from './lib/skillSyncManager.mjs';
 import { PythonBridge } from './runtime/pythonBridge.mjs';
 import { generateEmbedding } from './lib/embedding.mjs';
+import { SkillCache } from './lib/skillCache.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
