@@ -436,6 +436,16 @@ function renderSessions() {
       state.trace = [];
       render();
     });
+    const id = button.dataset.sessionId;
+    button.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      ContextMenu.show(e.clientX, e.clientY, [
+        { label: '打开', icon: '📂', action: () => loadSession(id) },
+        { label: '重命名', icon: '✏️', action: () => Toast.info('重命名功能开发中') },
+        { separator: true },
+        { label: '删除', icon: '🗑', danger: true, action: () => deleteSession(id) },
+      ]);
+    });
   });
 }
 
@@ -1467,10 +1477,64 @@ function bindEvents() {
   window.addEventListener('unload', () => clearInterval(subagentPollInterval));
 }
 
+// ── Context Menu ──
+class ContextMenu {
+  static menu = null;
+  static items = [];
+
+  static init() {
+    this.menu = document.getElementById('contextMenu');
+    document.addEventListener('click', () => this.hide());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.hide();
+    });
+  }
+
+  static show(x, y, items) {
+    if (!this.menu) this.init();
+    this.items = items;
+    const container = document.getElementById('contextMenuItems');
+    container.innerHTML = items.map((item, i) => {
+      if (item.separator) return '<div class="context-menu-separator"></div>';
+      return `
+        <button class="context-menu-item ${item.danger ? 'danger' : ''}" data-index="${i}">
+          ${item.icon ? `<span class="context-menu-icon">${item.icon}</span>` : ''}
+          <span>${item.label}</span>
+        </button>
+      `;
+    }).join('');
+
+    container.querySelectorAll('.context-menu-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.index);
+        this.items[idx].action?.();
+        this.hide();
+      });
+    });
+
+    // 定位
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x;
+    let top = y;
+    if (x + 200 > vw) left = vw - 210;
+    if (y + 200 > vh) top = vh - 210;
+
+    this.menu.style.left = `${left}px`;
+    this.menu.style.top = `${top}px`;
+    this.menu.classList.add('visible');
+  }
+
+  static hide() {
+    if (this.menu) this.menu.classList.remove('visible');
+  }
+}
+
 async function init() {
   bindEvents();
   Toast.init();
   Modal.init();
+  ContextMenu.init();
   setupGlobalShortcuts();
   try {
     await loadBaseData();
