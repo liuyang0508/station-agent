@@ -1,6 +1,7 @@
 import { AgentRuntimeAdapter } from './BaseRuntime.mjs';
 import { readModelApiKey } from '../../lib/secrets.mjs';
 import { ContextCompactor } from '../sandboxExecutor.mjs';
+import { getCircuitBreaker } from '../../lib/circuitBreaker.mjs';
 
 const MAX_TURN_LOOPS = 20;
 
@@ -66,6 +67,12 @@ export class OpenAICompatibleRuntime extends AgentRuntimeAdapter {
     super(context);
     this._apiKey = null;
     this.contextCompactor = new ContextCompactor({ maxMessages: 40, maxTokens: 60000 });
+    // Circuit breaker for model API calls
+    this.circuitBreaker = getCircuitBreaker('openai-compatible-model', {
+      failureThreshold: 3,
+      successThreshold: 2,
+      resetTimeoutMs: 30000
+    });
   }
 
   _getApiKey() {
@@ -154,19 +161,35 @@ export class OpenAICompatibleRuntime extends AgentRuntimeAdapter {
           requestBody.tool_choice = 'auto';
         }
 
-        const response = await fetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify(requestBody)
+        // Use circuit breaker for API calls
+        const response = await this.circuitBreaker.execute(async () => {
+          const res = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(requestBody)
+          });
+          // Circuit breaker will track failures via non-2xx responses
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          return res;
         });
 
         if (!response.ok) {
           const detail = await response.text();
-          yield { type: 'trace', title: '模型运行时', detail: `HTTP ${response.status} ${detail.slice(0, 300)}`, status: 'error' };
-          yield { type: 'done', detail: '运行完成（模型调用失败）' };
+          // Differentiate error types
+          let errorHint = '';
+          if (response.status === 401 || response.status === 403) {
+            errorHint = '请检查 API Key 是否正确';
+          } else if (response.status >= 500) {
+            errorHint = '服务器错误，请稍后重试';
+          }
+          const errorDetail = errorHint ? `${detail.slice(0, 200)} (${errorHint})` : detail.slice(0, 300);
+          yield { type: 'trace', title: '模型运行时', detail: `HTTP ${response.status} ${errorDetail}`, status: 'error' };
+          yield { type: 'done', detail: `运行完成（${response.status === 401 || response.status === 403 ? '认证失败' : '模型调用失败'}）` };
           return;
         }
 
@@ -258,6 +281,12 @@ export class OpenAICompatibleRuntime extends AgentRuntimeAdapter {
       yield { type: 'trace', title: '工具循环', detail: `达到最大循环次数 ${MAX_TURN_LOOPS}，强制退出`, status: 'warn' };
       yield { type: 'done', detail: `运行完成（达到最大循环 ${MAX_TURN_LOOPS}）` };
     } catch (error) {
+      // Check if circuit breaker is open
+      if (error.message === 'Circuit breaker is OPEN') {
+        yield { type: 'trace', title: '模型运行时', detail: '服务暂时不可用 (熔断器已触发)，请稍后重试', status: 'error' };
+        yield { type: 'done', detail: '运行完成（熔断器触发，请稍后重试）' };
+        return;
+      }
       yield { type: 'trace', title: '模型运行时', detail: error.message, status: 'error' };
       yield { type: 'done', detail: '运行完成（异常）' };
     }

@@ -47,7 +47,7 @@ const mcpManager = new McpManager({ store });
 const remoteControl = createRemoteControl(store);
 // Auto-register filesystem MCP server if not already configured
 const existingServers = store.listMcpServers();
-const hasFilesystem = existingServers.some(s => s.name === 'filesystem');
+const hasFilesystem = existingServers.some(s => s.name === 'Filesystem MCP');
 if (!hasFilesystem) {
   try {
     store.createMcpServer({
@@ -60,6 +60,22 @@ if (!hasFilesystem) {
     });
   } catch (e) {
     logger.warn('Failed to register filesystem MCP server', { error: e.message });
+  }
+}
+// Auto-register mock MCP server for testing if not already configured
+const hasMock = existingServers.some(s => s.name === 'Mock MCP');
+if (!hasMock) {
+  try {
+    store.createMcpServer({
+      name: 'Mock MCP',
+      command: 'node',
+      args: [path.join(projectRoot, 'scripts/mock-mcp-server.mjs')],
+      cwd: projectRoot,
+      env: {},
+      enabled: false  // Disabled by default, user can enable to test
+    });
+  } catch (e) {
+    logger.warn('Failed to register mock MCP server', { error: e.message });
   }
 }
 const subagentManager = new SubagentManager({ store, settings: store.getSettings() });
@@ -442,7 +458,22 @@ async function handleApi(req, res) {
 
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const body = await parseJson(req);
-    sendJson(res, 200, store.updateSettings(body));
+    const updatedSettings = store.updateSettings(body);
+
+    // Run health check to validate new settings
+    let connectionStatus = null;
+    if (body.baseUrl || body.apiKeyEnv || body.runtimeMode) {
+      try {
+        connectionStatus = await testModelConnection(updatedSettings);
+      } catch (e) {
+        connectionStatus = { ok: false, status: 'error', message: e.message };
+      }
+    }
+
+    sendJson(res, 200, {
+      ...updatedSettings,
+      connectionStatus
+    });
     return;
   }
 
@@ -908,6 +939,40 @@ async function handleApi(req, res) {
     } catch (error) {
       sendJson(res, 400, { error: error.message });
     }
+    return;
+  }
+
+  // GET /api/mcp/:id/logs - Get MCP server stdout/stderr logs
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 3 && parts[2] === 'logs') {
+    sendJson(res, 404, { error: 'Missing server ID' });
+    return;
+  }
+
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 4 && parts[3] === 'logs') {
+    const snapshot = mcpManager.snapshot(parts[2]);
+    if (!snapshot) {
+      sendJson(res, 404, { error: 'MCP server not found or not running' });
+      return;
+    }
+    sendJson(res, 200, {
+      pid: snapshot.pid,
+      startedAt: snapshot.startedAt,
+      stdout: snapshot.stdout,
+      stderr: snapshot.stderr
+    });
+    return;
+  }
+
+  // GET /api/mcp/:id - Get MCP server details
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 3) {
+    const servers = store.listMcpServers();
+    const server = servers.find(s => s.id === parts[2]);
+    if (!server) {
+      sendJson(res, 404, { error: 'MCP server not found' });
+      return;
+    }
+    const runtime = mcpManager.snapshot(parts[2]);
+    sendJson(res, 200, { ...server, runtime });
     return;
   }
 

@@ -5,6 +5,38 @@ const CONTENT_LENGTH_HEADER = 'Content-Length: ';
 const HEADER_SEPARATOR = '\r\n\r\n';
 
 /**
+ * MCP Traffic Logger - captures MCP JSON-RPC messages for debugging
+ */
+export const mcpTrafficLogger = {
+  enabled: false,
+  logs: [],
+
+  log(direction, message) {
+    if (!this.enabled) return;
+    const entry = {
+      timestamp: new Date().toISOString(),
+      direction, // 'send' or 'recv'
+      message
+    };
+    this.logs.push(entry);
+    // Keep last 1000 entries
+    if (this.logs.length > 1000) {
+      this.logs = this.logs.slice(-1000);
+    }
+    // Also log to stderr for real-time debugging
+    console.error(`[MCP TRAFFIC ${direction.toUpperCase()}]`, JSON.stringify(message).slice(0, 500));
+  },
+
+  getLogs() {
+    return this.logs;
+  },
+
+  clear() {
+    this.logs = [];
+  }
+};
+
+/**
  * MCP Transport for stdio communication
  *
  * MCP protocol uses a simple message framing:
@@ -64,6 +96,8 @@ export class McpTransport {
 
             try {
               const message = JSON.parse(body);
+              // Log incoming traffic
+              mcpTrafficLogger.log('recv', message);
               if (this.messageHandler) {
                 this.messageHandler(message);
               }
@@ -84,6 +118,8 @@ export class McpTransport {
         if (line.startsWith('{') && line.endsWith('}')) {
           try {
             const message = JSON.parse(line);
+            // Log incoming traffic
+            mcpTrafficLogger.log('recv', message);
             if (this.messageHandler) {
               this.messageHandler(message);
             }
@@ -107,6 +143,9 @@ export class McpTransport {
     if (this.closed) {
       throw new Error('Transport is closed');
     }
+
+    // Log outgoing traffic
+    mcpTrafficLogger.log('send', message);
 
     const body = JSON.stringify(message) + '\n';
 

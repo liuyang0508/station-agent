@@ -6,6 +6,7 @@
  */
 
 import { AgentRuntimeAdapter } from './BaseRuntime.mjs';
+import { getCircuitBreaker } from '../../lib/circuitBreaker.mjs';
 
 const DEFAULT_HISTORY_WINDOW = 20;
 const DEFAULT_MEMORY_LIMIT = 8;
@@ -15,6 +16,12 @@ export class BaseRemoteAdapter extends AgentRuntimeAdapter {
     super(context);
     this.endpoint = context.endpoint || this.getDefaultEndpoint();
     this.name = context.name || this.getAdapterName();
+    // Create a circuit breaker for this adapter
+    this.circuitBreaker = getCircuitBreaker(`remote-${this.name}`, {
+      failureThreshold: 3,
+      successThreshold: 2,
+      resetTimeoutMs: 30000
+    });
   }
 
   getDefaultEndpoint() {
@@ -122,11 +129,14 @@ export class BaseRemoteAdapter extends AgentRuntimeAdapter {
       const executePath = this.getExecutePath();
       const executeMethod = this.getExecuteMethod();
 
-      const response = await fetch(`${this.endpoint}${executePath}`, {
-        method: executeMethod,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(this.buildPayload(prompt, context)),
-        signal: AbortSignal.timeout(120000)
+      // Use circuit breaker to wrap the fetch call
+      const response = await this.circuitBreaker.execute(async () => {
+        return fetch(`${this.endpoint}${executePath}`, {
+          method: executeMethod,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(this.buildPayload(prompt, context)),
+          signal: AbortSignal.timeout(120000)
+        });
       });
 
       if (!response.ok) {
@@ -149,6 +159,18 @@ export class BaseRemoteAdapter extends AgentRuntimeAdapter {
 
       yield { type: 'done', detail: '运行完成' };
     } catch (error) {
+      // Check if circuit breaker is open
+      if (error.message === 'Circuit breaker is OPEN') {
+        yield {
+          type: 'trace',
+          title: this.name,
+          detail: '服务暂时不可用 (熔断器已触发)，请稍后重试',
+          status: 'error'
+        };
+        yield { type: 'done', detail: '服务熔断中，请稍后重试' };
+        return;
+      }
+
       yield {
         type: 'trace',
         title: this.name,
@@ -162,7 +184,8 @@ export class BaseRemoteAdapter extends AgentRuntimeAdapter {
   getInfo() {
     return {
       mode: this.getAdapterName(),
-      endpoint: this.endpoint
+      endpoint: this.endpoint,
+      circuitState: this.circuitBreaker.getState()
     };
   }
 }

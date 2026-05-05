@@ -50,7 +50,7 @@ const PALETTE_COMMANDS = [
   {
     group: '操作',
     items: [
-      { id: 'toggle-theme', label: '切换主题', icon: '🎨', action: () => Toast.info('主题切换功能开发中') },
+      { id: 'toggle-theme', label: '切换主题', icon: '🎨', action: () => document.getElementById('themeToggleButton')?.click() },
       { id: 'shortcuts-help', label: '快捷键帮助', icon: '⌨️', shortcut: '⌘/', action: () => showShortcutsHelp() },
     ]
   }
@@ -137,6 +137,36 @@ function showShortcutsHelp() {
     footer: '<button class="modal-btn primary" id="modalCloseHelp">好的</button>'
   });
   document.getElementById('modalCloseHelp').addEventListener('click', () => Modal.hide());
+}
+
+function setupThemeToggle() {
+  const btn = document.getElementById('themeToggleButton');
+  if (!btn) return;
+
+  // Default to dark theme, only load saved light theme if explicitly set
+  const saved = localStorage.getItem('theme');
+  if (saved === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    btn.textContent = '☀️';
+  } else {
+    // Force dark theme as default
+    document.documentElement.removeAttribute('data-theme');
+    btn.textContent = '🌙';
+    localStorage.removeItem('theme');
+  }
+
+  btn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    if (current === 'light') {
+      document.documentElement.removeAttribute('data-theme');
+      btn.textContent = '🌙';
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      btn.textContent = '☀️';
+      localStorage.setItem('theme', 'light');
+    }
+  });
 }
 
 function setupGlobalShortcuts() {
@@ -284,6 +314,148 @@ class Modal {
       if (onConfirm) onConfirm();
     });
   }
+}
+
+// ── MCP Inspector Functions ──
+function showMcpLogViewer(serverId, logs) {
+  Modal.show({
+    title: `MCP 日志 - ${serverId.slice(0, 8)}`,
+    body: `
+      <div class="mcp-log-viewer">
+        <div class="log-header">
+          <span class="log-pid">PID: ${logs.pid || 'N/A'}</span>
+          <span class="log-started">启动时间: ${logs.startedAt ? formatTime(logs.startedAt) : 'N/A'}</span>
+        </div>
+        <div class="log-tabs">
+          <button class="log-tab active" data-tab="stdout">stdout</button>
+          <button class="log-tab" data-tab="stderr">stderr</button>
+        </div>
+        <pre class="log-content" id="logContent">${escapeText(logs.stdout || '(empty)')}</pre>
+      </div>
+    `,
+    footer: `<button class="modal-btn secondary" id="mcpLogRefresh">刷新</button><button class="modal-btn primary" id="mcpLogClose">关闭</button>`
+  });
+
+  document.getElementById('mcpLogClose').addEventListener('click', () => Modal.hide());
+  document.getElementById('mcpLogRefresh').addEventListener('click', async () => {
+    try {
+      const newLogs = await api(`/api/mcp/${serverId}/logs`);
+      document.getElementById('logContent').textContent = newLogs.stdout || '(empty)';
+    } catch (error) {
+      Toast.error('刷新失败: ' + error.message);
+    }
+  });
+
+  document.querySelectorAll('.log-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const content = document.getElementById('logContent');
+      if (tab.dataset.tab === 'stdout') {
+        content.textContent = logs.stdout || '(empty)';
+      } else {
+        content.textContent = logs.stderr || '(empty)';
+      }
+    });
+  });
+}
+
+function showMcpInspector(serverId, server, toolsResult) {
+  const tools = toolsResult.tools || [];
+  Modal.show({
+    title: `MCP 检查器 - ${escapeText(server.name)}`,
+    body: `
+      <div class="mcp-inspector">
+        <div class="inspector-section">
+          <h3>服务信息</h3>
+          <div class="info-grid">
+            <div class="info-item"><label>状态:</label><span class="pill ${server.status}">${server.status || 'stopped'}</span></div>
+            <div class="info-item"><label>PID:</label><span>${server.runtime?.pid || 'N/A'}</span></div>
+            <div class="info-item"><label>命令:</label><span>${escapeText(server.command)}</span></div>
+            <div class="info-item"><label>工具数:</label><span>${tools.length}</span></div>
+          </div>
+        </div>
+        <div class="inspector-section">
+          <h3>发现工具 (${tools.length})</h3>
+          <div class="tools-list">
+            ${tools.length === 0 ? '<div class="item-detail">暂无工具</div>' :
+              tools.map(tool => `
+                <div class="tool-item">
+                  <div class="tool-name">${escapeText(tool.name)}</div>
+                  <div class="tool-desc">${escapeText(tool.description || '无描述')}</div>
+                  <button class="skill-toggle tool-call-btn" data-tool-name="${escapeText(tool.name)}" data-tool-schema='${JSON.stringify(tool.inputSchema || {})}')">调用</button>
+                </div>
+              `).join('')
+            }
+          </div>
+        </div>
+      </div>
+    `,
+    footer: `<button class="modal-btn secondary" id="mcpInspectorClose">关闭</button>`
+  });
+
+  document.getElementById('mcpInspectorClose').addEventListener('click', () => Modal.hide());
+
+  document.querySelectorAll('.tool-call-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const toolName = btn.dataset.toolName;
+      const schema = JSON.parse(btn.dataset.toolSchema || '{}');
+      showToolCallDialog(serverId, toolName, schema);
+    });
+  });
+}
+
+function showToolCallDialog(serverId, toolName, schema) {
+  const properties = schema.properties || {};
+  const required = schema.required || [];
+
+  let inputFields = '';
+  for (const [name, prop] of Object.entries(properties)) {
+    const isRequired = required.includes(name);
+    inputFields += `
+      <label class="${isRequired ? 'required' : ''}">
+        <span>${escapeText(name)}${isRequired ? ' *' : ''}</span>
+        <input type="text" name="${escapeText(name)}" placeholder="${escapeText(prop.description || name)}" />
+      </label>
+    `;
+  }
+
+  if (Object.keys(properties).length === 0) {
+    inputFields = '<div class="item-detail">此工具不需要参数</div>';
+  }
+
+  Modal.show({
+    title: `调用工具: ${escapeText(toolName)}`,
+    body: `<form id="toolCallForm">${inputFields}</form>`,
+    footer: `<button class="modal-btn secondary" id="toolCallCancel">取消</button><button class="modal-btn primary" id="toolCallSubmit">调用</button>`
+  });
+
+  document.getElementById('toolCallCancel').addEventListener('click', () => Modal.hide());
+  document.getElementById('toolCallSubmit').addEventListener('click', async () => {
+    const form = document.getElementById('toolCallForm');
+    const formData = new FormData(form);
+    const args = {};
+    for (const [key, value] of formData.entries()) {
+      if (value) args[key] = value;
+    }
+
+    try {
+      Toast.info('调用中...');
+      const result = await api(`/api/mcp/${serverId}/call`, {
+        method: 'POST',
+        body: JSON.stringify({ name: toolName, args })
+      });
+      Modal.hide();
+      Modal.show({
+        title: `工具结果: ${escapeText(toolName)}`,
+        body: `<pre class="tool-result">${escapeText(JSON.stringify(result, null, 2))}</pre>`,
+        footer: `<button class="modal-btn primary" id="toolResultClose">关闭</button>`
+      });
+      document.getElementById('toolResultClose').addEventListener('click', () => Modal.hide());
+    } catch (error) {
+      Toast.error('调用失败: ' + error.message);
+    }
+  });
 }
 
 async function api(path, options = {}) {
@@ -526,6 +698,7 @@ function renderSkills() {
           </div>
           <div class="item-footer">
             ${statusPill(skill.enabled ? 'enabled' : 'paused')}
+            <button class="skill-toggle" type="button" data-skill-preview="${skill.id}">详情</button>
             <button class="skill-toggle" type="button" data-skill-run-id="${skill.id}">
               运行
             </button>
@@ -547,11 +720,55 @@ function renderSkills() {
     });
   });
 
+  document.querySelectorAll('[data-skill-preview]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const skill = state.skills.find(s => s.id === button.dataset.skillPreview);
+      showSkillPreviewModal(skill);
+    });
+  });
+
   document.querySelectorAll('[data-skill-run-id]').forEach((button) => {
     button.addEventListener('click', async () => {
-      const result = await api(`/api/skills/${button.dataset.skillRunId}/run`, {
+      const skillId = button.dataset.skillRunId;
+      const skill = state.skills.find(s => s.id === skillId);
+      showSkillRunModal(skillId, skill);
+    });
+  });
+}
+
+function showSkillRunModal(skillId, skill) {
+  Modal.show({
+    title: `运行技能: ${escapeText(skill?.name || 'Unknown')}`,
+    body: `
+      <form id="skillRunForm">
+        <label class="wide-field">
+          <span>输入参数 (JSON)</span>
+          <textarea name="input" rows="4" placeholder='{"key": "value"}'>${skill?.inputSchema ? JSON.stringify(skill.inputSchema, null, 2) : '{"sessionId": "' + state.activeSessionId + '"}'}</textarea>
+        </label>
+      </form>
+    `,
+    footer: `<button class="modal-btn secondary" id="skillRunCancel">取消</button><button class="modal-btn primary" id="skillRunSubmit">运行</button>`
+  });
+
+  document.getElementById('skillRunCancel').addEventListener('click', () => Modal.hide());
+  document.getElementById('skillRunSubmit').addEventListener('click', async () => {
+    const form = document.getElementById('skillRunForm');
+    const formData = new FormData(form);
+    let input;
+    try {
+      input = JSON.parse(formData.get('input') || '{}');
+    } catch (e) {
+      Toast.error('输入必须是有效的 JSON 格式');
+      return;
+    }
+
+    Modal.hide();
+    Toast.info('技能运行中...');
+
+    try {
+      const result = await api(`/api/skills/${skillId}/run`, {
         method: 'POST',
-        body: JSON.stringify({ input: { sessionId: state.activeSessionId } })
+        body: JSON.stringify({ input })
       });
       state.trace.unshift({
         title: `技能运行: ${result.skillName}`,
@@ -559,8 +776,84 @@ function renderSkills() {
         status: result.status
       });
       renderTrace();
-    });
+      Toast.success('技能执行完成');
+    } catch (error) {
+      Toast.error('技能执行失败: ' + error.message);
+    }
   });
+}
+
+function showSkillPreviewModal(skill) {
+  if (!skill) return;
+
+  const metadata = [];
+  if (skill.version) metadata.push(`版本: ${skill.version}`);
+  if (skill.author) metadata.push(`作者: ${escapeText(skill.author)}`);
+  if (skill.source) metadata.push(`来源: ${escapeText(skill.source)}`);
+  if (skill.createdAt) metadata.push(`创建: ${formatTime(skill.createdAt)}`);
+  if (skill.updatedAt) metadata.push(`更新: ${formatTime(skill.updatedAt)}`);
+  if (skill.runCount !== undefined) metadata.push(`运行次数: ${skill.runCount}`);
+
+  Modal.show({
+    title: escapeText(skill.name),
+    body: `
+      <div class="skill-preview">
+        <div class="skill-meta">
+          ${metadata.length > 0 ? `<div class="meta-items">${metadata.join(' · ')}</div>` : ''}
+        </div>
+        <div class="skill-description">
+          <h4>描述</h4>
+          <p>${escapeText(skill.description || '无描述')}</p>
+        </div>
+        ${skill.content ? `
+          <div class="skill-content">
+            <h4>内容</h4>
+            <pre>${escapeText(skill.content.slice(0, 1000))}${skill.content.length > 1000 ? '...' : ''}</pre>
+          </div>
+        ` : ''}
+        ${skill.inputSchema ? `
+          <div class="skill-schema">
+            <h4>输入参数</h4>
+            <pre>${escapeText(JSON.stringify(skill.inputSchema, null, 2))}</pre>
+          </div>
+        ` : ''}
+      </div>
+    `,
+    footer: `<button class="modal-btn primary" id="skillPreviewClose">关闭</button>`
+  });
+
+  document.getElementById('skillPreviewClose').addEventListener('click', () => Modal.hide());
+}
+
+function showSkillHistoryModal(runs) {
+  if (!runs || runs.length === 0) {
+    Modal.show({
+      title: '技能运行历史',
+      body: '<div class="item-detail">暂无运行历史</div>',
+      footer: `<button class="modal-btn primary" id="skillHistoryClose">关闭</button>`
+    });
+  } else {
+    Modal.show({
+      title: `技能运行历史 (${runs.length})`,
+      body: `
+        <div class="skill-history-grid">
+          ${runs.slice(0, 50).map(run => `
+            <div class="history-item">
+              <div class="history-item-header">
+                <span class="history-item-name">${escapeText(run.skillName || run.skillId || 'Unknown')}</span>
+                <span class="history-item-status ${run.status === 'success' ? 'success' : 'error'}">${run.status || 'unknown'}</span>
+              </div>
+              <div class="history-item-time">${run.executedAt ? formatTime(run.executedAt) : ''}</div>
+              ${run.result ? `<div class="history-item-result">${escapeText(typeof run.result === 'string' ? run.result : JSON.stringify(run.result).slice(0, 200))}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `,
+      footer: `<button class="modal-btn primary" id="skillHistoryClose">关闭</button>`
+    });
+  }
+
+  document.getElementById('skillHistoryClose').addEventListener('click', () => Modal.hide());
 }
 
 function renderConnectors() {
@@ -592,6 +885,8 @@ function renderMcp() {
             ${statusPill(server.status || 'stopped')}
             <button class="skill-toggle" type="button" data-mcp-start="${server.id}">启动</button>
             <button class="skill-toggle" type="button" data-mcp-stop="${server.id}">停止</button>
+            <button class="skill-toggle" type="button" data-mcp-logs="${server.id}">日志</button>
+            <button class="skill-toggle" type="button" data-mcp-inspect="${server.id}">检查</button>
           </div>
         </article>
       `
@@ -610,6 +905,31 @@ function renderMcp() {
       await api(`/api/mcp/${button.dataset.mcpStop}/stop`, { method: 'POST' });
       state.mcpServers = await api('/api/mcp');
       renderMcp();
+    });
+  });
+  document.querySelectorAll('[data-mcp-logs]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const serverId = button.dataset.mcpLogs;
+      try {
+        const logs = await api(`/api/mcp/${serverId}/logs`);
+        showMcpLogViewer(serverId, logs);
+      } catch (error) {
+        Toast.error('无法获取日志: ' + error.message);
+      }
+    });
+  });
+  document.querySelectorAll('[data-mcp-inspect]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const serverId = button.dataset.mcpInspect;
+      try {
+        const [server, tools] = await Promise.all([
+          api(`/api/mcp/${serverId}`),
+          api(`/api/mcp/${serverId}/tools`)
+        ]);
+        showMcpInspector(serverId, server, tools);
+      } catch (error) {
+        Toast.error('无法检查 MCP: ' + error.message);
+      }
     });
   });
 }
@@ -1021,6 +1341,45 @@ function bindEvents() {
     render();
   });
 
+  // Skill picker in composer
+  const skillPickerBtn = $('#skillPickerBtn');
+  const skillPickerSelect = $('#skillPickerSelect');
+
+  if (skillPickerBtn && skillPickerSelect) {
+    skillPickerBtn.addEventListener('click', () => {
+      skillPickerSelect.classList.toggle('hidden');
+      if (!skillPickerSelect.classList.contains('hidden')) {
+        // Populate skills
+        skillPickerSelect.innerHTML = '<option value="">使用技能...</option>' +
+          state.skills.filter(s => s.enabled).map(s =>
+            `<option value="${s.id}">${escapeText(s.name)}</option>`
+          ).join('');
+        skillPickerSelect.focus();
+      }
+    });
+
+    skillPickerSelect.addEventListener('change', () => {
+      const skillId = skillPickerSelect.value;
+      if (skillId) {
+        const skill = state.skills.find(s => s.id === skillId);
+        if (skill) {
+          // Insert skill invocation into prompt
+          const input = $('#promptInput');
+          input.value = `/skill ${skill.name} ${input.value}`.trim();
+          input.focus();
+        }
+      }
+      skillPickerSelect.classList.add('hidden');
+    });
+
+    // Hide select when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!skillPickerBtn.contains(e.target) && !skillPickerSelect.contains(e.target)) {
+        skillPickerSelect.classList.add('hidden');
+      }
+    });
+  }
+
   $('#exportSessionButton').addEventListener('click', () => {
     if (!state.activeSessionId) return;
     const link = document.createElement('a');
@@ -1029,6 +1388,16 @@ function bindEvents() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  });
+
+  // Skill history button
+  $('#skillHistoryBtn')?.addEventListener('click', async () => {
+    try {
+      const runs = await api('/api/skills/runs');
+      showSkillHistoryModal(runs);
+    } catch (error) {
+      Toast.error('无法加载技能历史: ' + error.message);
+    }
   });
 
   document.querySelectorAll('.nav-item').forEach((button) => {
@@ -1561,6 +1930,7 @@ async function init() {
   ContextMenu.init();
   Dropdown.initAll();
   setupGlobalShortcuts();
+  setupThemeToggle();
   try {
     await loadBaseData();
     // Initialize tabs from sessions

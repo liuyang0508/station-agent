@@ -53,6 +53,7 @@
             <span id="healthText">检查中</span>
           </div>
           <div class="top-actions">
+            <button id="themeToggleButton" type="button" title="切换主题">🌙</button>
             <button id="exportSessionButton" type="button">导出会话</button>
           </div>
         </header>
@@ -64,6 +65,12 @@
             <div class="message-feed" id="messageFeed"></div>
             <div class="terminal-output" id="terminalOutput"></div>
             <form class="composer" id="composer">
+              <div class="composer-toolbar">
+                <button type="button" id="skillPickerBtn" class="toolbar-btn" title="选择技能">🛠</button>
+                <select id="skillPickerSelect" class="skill-picker-select hidden">
+                  <option value="">使用技能...</option>
+                </select>
+              </div>
               <textarea id="promptInput" rows="3" placeholder="交给 Agent 的任务"></textarea>
               <div class="composer-actions">
                 <button type="button" id="voiceInputBtn" class="voice-btn" title="语音输入">🎤</button>
@@ -75,7 +82,10 @@
           <section class="view-panel hidden" id="viewSkills">
             <div class="panel-header">
               <h2>技能中心</h2>
-              <span id="skillCount"></span>
+              <div class="panel-actions">
+                <span id="skillCount"></span>
+                <button type="button" id="skillHistoryBtn" class="panel-action-btn" title="运行历史">历史</button>
+              </div>
             </div>
             <div class="upload-zone" id="skillUploadZone">
               <input type="file" id="skillFileInput" accept=".zip,.json,.md,.mjs,.py,.js,.ts" hidden />

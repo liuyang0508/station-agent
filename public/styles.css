@@ -36,6 +36,34 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/* ─── Light Theme ─── */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-deep: #FFFFFF;
+  --bg-surface: #F8FAFC;
+  --bg-elevated: #F1F5F9;
+  --border: #E2E8F0;
+  --border-subtle: #F1F5F9;
+  --primary: #8B5CF6;
+  --accent: #7C3AED;
+  --accent-glow: rgba(139, 92, 246, 0.12);
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+  --success: #16A34A;
+  --warning: #D97706;
+  --danger: #DC2626;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px rgba(139, 92, 246, 0.15);
+  --shadow-glow-strong: 0 0 40px rgba(139, 92, 246, 0.2);
+  --shadow-glow-blue: 0 0 20px rgba(59, 130, 246, 0.15);
+  --glass-bg: rgba(248, 250, 252, 0.9);
+  --glass-border: rgba(0, 0, 0, 0.06);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -2265,4 +2293,322 @@ select:focus-visible {
   width: 16px;
   text-align: center;
   font-size: 14px;
+}
+
+/* ─── MCP Log Viewer ─── */
+.mcp-log-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.log-header {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.log-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.log-tab {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.log-tab:hover {
+  background: var(--bg-elevated);
+}
+
+.log-tab.active {
+  background: var(--primary);
+  color: white;
+}
+
+.log-content {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+/* ─── MCP Inspector ─── */
+.mcp-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inspector-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.inspector-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.info-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.info-item label {
+  color: var(--text-secondary);
+}
+
+.info-item span {
+  color: var(--text-primary);
+}
+
+.tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.tool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-deep);
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.tool-name {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+}
+
+.tool-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.tool-result {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+/* ─── Skill Picker ─── */
+.composer-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.toolbar-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.toolbar-btn:hover {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  border-color: var(--primary);
+}
+
+.skill-picker-select {
+  flex: 1;
+  max-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.skill-picker-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.skill-picker-select.hidden {
+  display: none;
+}
+
+/* ─── Skill History Panel ─── */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.panel-action-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all var(--transition-fast);
+}
+
+.panel-action-btn:hover {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  border-color: var(--primary);
+}
+
+.skill-history-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.history-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.history-item-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.history-item-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.history-item-result {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.history-item-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.history-item-status.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.history-item-status.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}
+
+/* ─── Skill Preview Modal ─── */
+.skill-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.skill-meta {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.meta-items {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.skill-description h4,
+.skill-content h4,
+.skill-schema h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.skill-description p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.skill-content pre,
+.skill-schema pre {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  max-height: 200px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
