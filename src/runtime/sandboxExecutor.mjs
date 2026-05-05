@@ -158,9 +158,34 @@ export class SubagentManager {
     this.store = store;
     this.settings = settings;
     this.activeSubagents = new Map();
+    this.listeners = new Set();
   }
 
-  spawn({ task, parentSessionId, priority = 'normal' }) {
+  /**
+   * 添加事件监听器
+   */
+  addListener(callback) {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  /**
+   * 触发事件
+   */
+  emit(event) {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.warn('[SubagentManager] Listener error:', error.message);
+      }
+    }
+  }
+
+  /**
+   * 创建子任务
+   */
+  spawn({ task, parentSessionId, priority = 'normal', timeoutMs = 300000 }) {
     const subagentId = randomUUID();
     const session = this.store.createSession({
       title: `子任务: ${String(task).slice(0, 50)}`,
@@ -174,39 +199,232 @@ export class SubagentManager {
       parentSessionId,
       priority,
       status: 'running',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      timeoutMs,
+      timeoutHandle: null
     };
+
+    // 设置超时
+    subagent.timeoutHandle = setTimeout(() => {
+      this.fail(subagentId, 'Timeout');
+    }, timeoutMs);
 
     this.activeSubagents.set(subagentId, subagent);
     this.store.updateSession(session.id, { status: 'subagent', parentId: parentSessionId });
 
+    this.emit({ type: 'subagent.spawn', subagent });
+
     return subagent;
   }
 
+  /**
+   * 标记子任务完成
+   */
   complete(subagentId, result) {
     const subagent = this.activeSubagents.get(subagentId);
     if (!subagent) return;
+    this._clearTimeout(subagent);
+
     subagent.status = 'completed';
     subagent.result = result;
     subagent.completedAt = new Date().toISOString();
     this.store.updateSession(subagent.sessionId, { status: 'idle' });
+
+    this.emit({ type: 'subagent.complete', subagent, result });
+
+    // 如果有父任务，通知完成
+    if (subagent.parentSessionId) {
+      this.emit({
+        type: 'subagent.parent.notify',
+        parentId: subagent.parentSessionId,
+        subagentId,
+        result
+      });
+    }
   }
 
+  /**
+   * 标记子任务失败
+   */
   fail(subagentId, error) {
     const subagent = this.activeSubagents.get(subagentId);
     if (!subagent) return;
+    this._clearTimeout(subagent);
+
     subagent.status = 'failed';
     subagent.error = error;
     subagent.completedAt = new Date().toISOString();
     this.store.updateSession(subagent.sessionId, { status: 'idle' });
+
+    this.emit({ type: 'subagent.fail', subagent, error });
+
+    // 如果有父任务，通知失败
+    if (subagent.parentSessionId) {
+      this.emit({
+        type: 'subagent.parent.notify',
+        parentId: subagent.parentSessionId,
+        subagentId,
+        error
+      });
+    }
   }
 
+  _clearTimeout(subagent) {
+    if (subagent.timeoutHandle) {
+      clearTimeout(subagent.timeoutHandle);
+      subagent.timeoutHandle = null;
+    }
+  }
+
+  /**
+   * 列出活跃子任务
+   */
   listActive() {
     return Array.from(this.activeSubagents.values()).filter(s => s.status === 'running');
   }
 
+  /**
+   * 获取子任务
+   */
   get(subagentId) {
     return this.activeSubagents.get(subagentId);
+  }
+
+  /**
+   * 获取子任务结果（等待完成）
+   */
+  async waitForResult(subagentId, timeoutMs = 300000) {
+    const subagent = this.activeSubagents.get(subagentId);
+    if (!subagent) throw new Error('Subagent not found');
+
+    if (subagent.status !== 'running') {
+      return subagent;
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.removeListener(listener);
+        reject(new Error('Timeout waiting for subagent'));
+      }, timeoutMs);
+
+      const listener = (event) => {
+        if (event.subagentId === subagentId &&
+            (event.type === 'subagent.complete' || event.type === 'subagent.fail')) {
+          clearTimeout(timeout);
+          this.removeListener(listener);
+          resolve(this.get(subagentId));
+        }
+      };
+
+      this.addListener(listener);
+    });
+  }
+
+  /**
+   * 批量创建并行子任务
+   */
+  spawnTeam(tasks, options = {}) {
+    const { parallel = true, stopOnError = false } = options;
+    const teamId = randomUUID();
+
+    const team = {
+      id: teamId,
+      tasks: tasks.map((task, index) => ({
+        id: randomUUID(),
+        task,
+        index,
+        status: 'pending'
+      })),
+      parallel,
+      stopOnError,
+      status: 'running',
+      createdAt: new Date().toISOString()
+    };
+
+    this.emit({ type: 'team.spawn', team });
+
+    if (parallel) {
+      // 并行执行所有任务
+      for (const task of team.tasks) {
+        const subagent = this.spawn({
+          task: task.task,
+          parentSessionId: null,
+          priority: 'normal'
+        });
+        task.subagentId = subagent.id;
+      }
+    } else {
+      // 串行执行第一个任务
+      this._spawnNext(team);
+    }
+
+    return team;
+  }
+
+  _spawnNext(team) {
+    const nextTask = team.tasks.find(t => t.status === 'pending');
+    if (!nextTask) {
+      team.status = 'completed';
+      this.emit({ type: 'team.complete', team });
+      return;
+    }
+
+    const subagent = this.spawn({
+      task: nextTask.task,
+      parentSessionId: null,
+      priority: 'normal'
+    });
+    nextTask.subagentId = subagent.id;
+    nextTask.status = 'running';
+  }
+
+  /**
+   * 获取团队状态
+   */
+  getTeamStatus(teamId) {
+    const team = this.teams?.get(teamId);
+    if (!team) return null;
+
+    const results = team.tasks.map(t => ({
+      index: t.index,
+      status: t.status,
+      result: t.subagent ? this.get(t.subagentId)?.result : null,
+      error: t.subagent ? this.get(t.subagentId)?.error : null
+    }));
+
+    return {
+      teamId,
+      status: team.status,
+      completed: results.filter(r => r.status === 'completed').length,
+      failed: results.filter(r => r.status === 'failed').length,
+      total: results.length,
+      results
+    };
+  }
+
+  /**
+   * 列出所有活跃子任务
+   */
+  listAll() {
+    return Array.from(this.activeSubagents.values());
+  }
+
+  /**
+   * 清理已完成的子任务
+   */
+  cleanup(maxAgeMs = 3600000) {
+    const cutoff = Date.now() - maxAgeMs;
+    for (const [id, subagent] of this.activeSubagents.entries()) {
+      if (subagent.status !== 'running' &&
+          subagent.completedAt &&
+          new Date(subagent.completedAt).getTime() < cutoff) {
+        this.activeSubagents.delete(id);
+      }
+    }
+  }
+
+  removeListener(listener) {
+    this.listeners.delete(listener);
   }
 }
 

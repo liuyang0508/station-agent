@@ -11,6 +11,7 @@ import {
 } from './skillFormats.mjs';
 import { createSkillEvolution } from './skillEvolution.mjs';
 import { SkillCache } from './skillCache.mjs';
+import logger from './logger.mjs';
 
 function readJsonIfExists(filePath) {
   if (!fs.existsSync(filePath)) return null;
@@ -307,7 +308,7 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
     const evolution = skillEvolution.evaluate(runRecord, { context: {} });
     if (evolution) {
       skillEvolution.evolve(skillId, evolution).catch(err => {
-        console.error('Evolution failed:', err);
+        logger.error('Evolution failed', { error: err.message, skillId });
       });
     }
     return runRecord;
@@ -337,7 +338,7 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
     const evolution = skillEvolution.evaluate(runRecord, { context: {} });
     if (evolution) {
       skillEvolution.evolve(skillId, evolution).catch(err => {
-        console.error('Evolution failed:', err);
+        logger.error('Evolution failed', { error: err.message, skillId });
       });
     }
     return runRecord;
@@ -362,7 +363,7 @@ export async function runSkill({ store, settings, skillId, input = {} }) {
   const evolution = skillEvolution.evaluate(runRecord, { context: {} });
   if (evolution) {
     skillEvolution.evolve(skillId, evolution).catch(err => {
-      console.error('Evolution failed:', err);
+      logger.error('Evolution failed', { error: err.message, skillId });
     });
   }
   return runRecord;

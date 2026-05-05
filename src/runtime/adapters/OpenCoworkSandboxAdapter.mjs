@@ -1,9 +1,13 @@
-import { AgentRuntimeAdapter } from './BaseRuntime.mjs';
+import { BaseRemoteAdapter } from './BaseRemoteAdapter.mjs';
 
-export class OpenCoworkSandboxAdapter extends AgentRuntimeAdapter {
+/**
+ * OpenCoworkSandboxAdapter — OpenCowork 沙箱适配器
+ *
+ * 连接 OpenCowork 沙箱服务，支持 WSL2/Lima/Docker 平台自动检测
+ */
+export class OpenCoworkSandboxAdapter extends BaseRemoteAdapter {
   constructor(context) {
     super(context);
-    this.sandboxUrl = context.sandboxUrl || 'http://localhost:7892';
     this.platform = context.platform || this._detectPlatform();
   }
 
@@ -13,54 +17,37 @@ export class OpenCoworkSandboxAdapter extends AgentRuntimeAdapter {
     return 'docker';
   }
 
-  async testConnection() {
-    try {
-      const response = await fetch(`${this.sandboxUrl}/api/health`, { method: 'GET' });
-      return { ok: response.ok, status: response.ok ? 'connected' : 'error', message: response.statusText };
-    } catch (error) {
-      return { ok: false, status: 'network_error', message: error.message };
-    }
+  getAdapterName() {
+    return 'opencowork';
   }
 
-  async *runTurn(prompt, context) {
-    const { session, history, settings, skills, memories = [], tools } = context;
+  getDefaultEndpoint() {
+    return 'http://localhost:7892';
+  }
 
-    yield { type: 'trace', title: 'OpenCowork Sandbox', detail: `平台: ${this.platform}, 端点: ${this.sandboxUrl}`, status: 'running' };
-    yield { type: 'trace', title: '沙箱隔离', detail: `工作区: ${settings.workspaceRoot}`, status: 'ok' };
+  getHealthPath() {
+    return '/api/health';
+  }
 
-    try {
-      const response = await fetch(`${this.sandboxUrl}/api/v1/sandbox/execute`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          platform: this.platform,
-          history: history.slice(-20),
-          workspace: settings.workspaceRoot,
-          skills: skills.filter(s => s.enabled).map(s => s.name),
-          memories: memories.slice(0, 8).map(m => m.content),
-        })
-      });
+  getExecutePath() {
+    return '/api/v1/sandbox/execute';
+  }
 
-      if (!response.ok) {
-        yield { type: 'trace', title: 'OpenCowork Sandbox', detail: `执行失败: ${response.statusText}`, status: 'error' };
-        yield { type: 'done', detail: 'Sandbox 执行失败' };
-        return;
-      }
-
-      const result = await response.json();
-      for (const delta of result.delta || []) {
-        yield { type: 'assistant.delta', delta };
-      }
-
-      yield { type: 'done', detail: '运行完成' };
-    } catch (error) {
-      yield { type: 'trace', title: 'OpenCowork Sandbox', detail: error.message, status: 'error' };
-      yield { type: 'done', detail: 'Sandbox 运行异常' };
-    }
+  /**
+   * OpenCowork 需要 platform 参数
+   */
+  buildPayload(prompt, context) {
+    return {
+      ...super.buildPayload(prompt, context),
+      platform: this.platform,
+    };
   }
 
   getInfo() {
-    return { mode: 'opencowork', platform: this.platform, sandboxUrl: this.sandboxUrl };
+    return {
+      mode: 'opencowork',
+      platform: this.platform,
+      endpoint: this.endpoint
+    };
   }
 }

@@ -28,7 +28,10 @@ import { createToolRegistry } from './runtime/toolRegistry.mjs';
 import { WorkspaceWatcher } from './lib/fileWatcher.mjs';
 import { PluginManager, createPluginScaffold } from './lib/pluginSystem.mjs';
 import { TaskScheduler } from './lib/taskScheduler.mjs';
+import { safeFetch, validateUrl } from './lib/ssrfValidator.mjs';
+import logger from './lib/logger.mjs';
 import { RollbackManager } from './lib/rollbackManager.mjs';
+import { createRemoteControl } from './lib/remoteControl.mjs';
 import { SkillSyncManager } from './lib/skillSyncManager.mjs';
 import { PythonBridge } from './runtime/pythonBridge.mjs';
 import { generateEmbedding } from './lib/embedding.mjs';
@@ -41,6 +44,7 @@ const publicDir = path.join(projectRoot, 'public');
 const store = new JsonStore();
 const skillSyncManager = new SkillSyncManager({ store, dataDir: path.join(projectRoot, 'data') });
 const mcpManager = new McpManager({ store });
+const remoteControl = createRemoteControl(store);
 // Auto-register filesystem MCP server if not already configured
 const existingServers = store.listMcpServers();
 const hasFilesystem = existingServers.some(s => s.name === 'filesystem');
@@ -55,7 +59,7 @@ if (!hasFilesystem) {
       enabled: true
     });
   } catch (e) {
-    console.warn('Failed to register filesystem MCP server:', e.message);
+    logger.warn('Failed to register filesystem MCP server', { error: e.message });
   }
 }
 const subagentManager = new SubagentManager({ store, settings: store.getSettings() });
@@ -147,7 +151,8 @@ function parseArgs() {
   const port = portIndex >= 0 ? Number(process.argv[portIndex + 1]) : Number(process.env.PORT || 47891);
   return {
     port,
-    doctor: process.argv.includes('--doctor')
+    doctor: process.argv.includes('--doctor'),
+    cli: process.argv.includes('--cli')
   };
 }
 
@@ -353,6 +358,7 @@ async function handleRunEvents(req, res, runId) {
     sendSse(res, { type: 'error', message: error.message });
   } finally {
     runs.delete(runId);
+    runCancellers.delete(runId);
     res.end();
   }
 }
@@ -373,6 +379,54 @@ async function handleApi(req, res) {
 
   if (req.method === 'GET' && url.pathname === '/api/blueprint') {
     sendJson(res, 200, referenceBlueprint);
+    return;
+  }
+
+  // POST /api/teleport/ticket - 创建迁移票据
+  if (req.method === 'POST' && url.pathname === '/api/teleport/ticket') {
+    try {
+      const body = await parseJson(req);
+      const { sessionId, baseUrl } = body;
+      if (!sessionId) {
+        sendJson(res, 400, { error: 'sessionId required' });
+        return;
+      }
+      const ticket = remoteControl.createTicket(sessionId, { baseUrl });
+      sendJson(res, 200, ticket);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/teleport/tickets - 列出待使用票据
+  if (req.method === 'GET' && url.pathname === '/api/teleport/tickets') {
+    sendJson(res, 200, { tickets: remoteControl.listPendingTickets() });
+    return;
+  }
+
+  // POST /api/teleport/redeem - 使用票据恢复会话
+  if (req.method === 'POST' && url.pathname === '/api/teleport/redeem') {
+    try {
+      const body = await parseJson(req);
+      const { code } = body;
+      if (!code) {
+        sendJson(res, 400, { error: 'code required' });
+        return;
+      }
+      const result = await remoteControl.redeemTicket(code);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // DELETE /api/teleport/ticket/:code - 取消票据
+  if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'teleport' && parts[2] === 'ticket' && parts[3]) {
+    const shortCode = parts[3];
+    const cancelled = remoteControl.cancelTicket(shortCode);
+    sendJson(res, 200, { cancelled });
     return;
   }
 
@@ -475,12 +529,12 @@ async function handleApi(req, res) {
             store.createMemoryEmbedding(memory.id, Array.from(embedding));
           }
         }).catch(err => {
-          console.error('Failed to generate embedding:', err);
+          logger.error('Failed to generate embedding', { error: err.message });
         });
       } catch (err) {
         // Skip on duplicate but log other errors for debugging
         if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
-          console.warn(`[memory] Failed to create memory: ${err.message}`);
+          logger.warn('Failed to create memory', { error: err.message });
         }
       }
     }
@@ -1137,7 +1191,7 @@ async function handleApi(req, res) {
             try { store.installSkill(skill); } catch (err) {
             // Skip on duplicate (SQLITE_CONSTRAINT) but log other errors
             if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
-              console.warn(`[import] Failed to import skill "${skill.name}": ${err.message}`);
+              logger.warn('Failed to import skill', { skill: skill.name, error: err.message });
             }
           }
           }
@@ -1150,7 +1204,7 @@ async function handleApi(req, res) {
             try { store.createMemory({ title: mem.title, content: mem.content, tags: mem.tags, source: 'imported' }); } catch (err) {
               // Skip on duplicate but log other errors
               if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
-                console.warn(`[import] Failed to import memory "${mem.title}": ${err.message}`);
+                logger.warn('Failed to import memory', { memory: mem.title, error: err.message });
               }
             }
           }
@@ -1163,7 +1217,7 @@ async function handleApi(req, res) {
             try { store.createMcpServer({ name: srv.name, command: srv.command, args: srv.args, cwd: srv.cwd, enabled: false }); } catch (err) {
               // Skip on duplicate but log other errors
               if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
-                console.warn(`[import] Failed to import MCP server "${srv.name}": ${err.message}`);
+                logger.warn('Failed to import MCP server', { server: srv.name, error: err.message });
               }
             }
           }
@@ -1183,6 +1237,12 @@ async function handleApi(req, res) {
       const { endpoint, apiKey } = body;
       if (!endpoint) {
         sendJson(res, 400, { error: 'endpoint is required' });
+        return;
+      }
+      // SSRF validation - block private IP ranges and dangerous hosts
+      const validation = validateUrl(endpoint);
+      if (!validation.allowed) {
+        sendJson(res, 400, { error: `SSRF validation failed: ${validation.reason}` });
         return;
       }
       const backupData = {
@@ -1637,31 +1697,46 @@ if (args.doctor) {
   process.exit(0);
 }
 
-// Skill sync on startup (non-blocking)
-skillSyncManager.syncAll().catch(err => {
-  console.warn('Skill sync failed (non-critical):', err.message);
-});
+// CLI 管道模式
+if (args.cli) {
+  import('./lib/cli.mjs').then(async ({ cliMain }) => {
+    try {
+      await cliMain();
+    } catch (err) {
+      console.error('CLI Error:', err.message);
+      process.exit(1);
+    }
+  }).catch(err => {
+    console.error('CLI Error:', err.message);
+    process.exit(1);
+  });
+} else {
+  // Skill sync on startup (non-blocking)
+  skillSyncManager.syncAll().catch(err => {
+    logger.warn('Skill sync failed (non-critical)', { error: err.message });
+  });
 
 // Start Python sidecar
 try {
   pythonSidecar.start();
   pythonSidecar._syncLoadedSkills(); // populate skill cache before first tool registry use
 } catch (e) {
-  console.warn('Python sidecar start failed:', e.message);
+  logger.warn('Python sidecar start failed', { error: e.message });
 }
 
 process.on('exit', () => pythonSidecar.stop());
 
 createServer().listen(args.port, '127.0.0.1', () => {
-  console.log(`AIAgent Client running at http://127.0.0.1:${args.port}`);
+  logger.info('AIAgent Client started', { port: args.port, url: `http://127.0.0.1:${args.port}` });
   taskScheduler.start();
 
   // Auto-start enabled MCP servers
   for (const server of store.listMcpServers()) {
     if (server.enabled && server.status !== 'running') {
       mcpManager.start(server.id).catch(err => {
-        console.warn(`MCP server ${server.name} start failed:`, err.message);
+        logger.warn('MCP server start failed', { server: server.name, error: err.message });
       });
     }
   }
 });
+}

@@ -1,5 +1,6 @@
 import { AgentRuntimeAdapter } from './BaseRuntime.mjs';
 import { readModelApiKey } from '../../lib/secrets.mjs';
+import { ContextCompactor } from '../sandboxExecutor.mjs';
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -52,6 +53,7 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
   constructor(context) {
     super(context);
     this._apiKey = null;
+    this.contextCompactor = new ContextCompactor({ maxMessages: 40, maxTokens: 60000 });
   }
 
   _getApiKey() {
@@ -122,9 +124,20 @@ export class MiniMaxRuntime extends AgentRuntimeAdapter {
       content: buildSystemPrompt({ skills, memories, tools: toolList })
     };
 
+    // Compact history if it exceeds limits
+    const { messages: compactedHistory, compacted } = this.contextCompactor.compact(history);
+    if (compacted) {
+      yield {
+        type: 'trace',
+        title: '上下文压缩',
+        detail: `历史记录从 ${history.length} 条压缩至 ${compactedHistory.length} 条`,
+        status: 'ok'
+      };
+    }
+
     const conversationMessages = [
       systemMessage,
-      ...history.slice(-12).map((message) => ({
+      ...compactedHistory.slice(-20).map((message) => ({
         role: message.role === 'assistant' ? 'assistant' : 'user',
         content: message.content
       })),

@@ -1,5 +1,8 @@
 import { AgentRuntimeAdapter } from './BaseRuntime.mjs';
 import { readModelApiKey } from '../../lib/secrets.mjs';
+import { ContextCompactor } from '../sandboxExecutor.mjs';
+
+const MAX_TURN_LOOPS = 20;
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,7 +18,7 @@ function chunkText(text, size = 72) {
   return chunks;
 }
 
-function buildSystemPrompt({ skills, memories = [] }) {
+function buildSystemPrompt({ skills, memories = [], tools = [] }) {
   const enabledSkills = skills
     .filter((skill) => skill.enabled)
     .map((skill) => `${skill.name}: ${skill.description}`)
@@ -24,20 +27,45 @@ function buildSystemPrompt({ skills, memories = [] }) {
     .slice(0, 8)
     .map((memory) => `${memory.title}: ${memory.content}`)
     .join('\n');
+  const toolDescriptions = tools
+    .map((tool) => `  - ${tool.name}: ${tool.description}`)
+    .join('\n');
   return [
     '你是 AIAgent Client 的本地 Agent Runtime。',
     '你必须用中文优先回答，表达要专业、直接、可执行。',
     '你运行在一个本地优先客户端中，所有文件和命令动作都必须遵守工作区边界和审批策略。',
     '当任务复杂时，先给出可执行计划，再推进到交付物、命令或代码变更。',
+    toolDescriptions ? `可用工具:\n${toolDescriptions}` : null,
     `可用技能:\n${enabledSkills || '暂无启用技能。'}`,
     `长期记忆:\n${memoryContext || '暂无长期记忆。'}`,
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * OpenAI 格式的工具定义
+ */
+function toOpenAITools(tools) {
+  if (!tools || tools.length === 0) return undefined;
+
+  return tools.map(tool => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema || {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    }
+  }));
 }
 
 export class OpenAICompatibleRuntime extends AgentRuntimeAdapter {
   constructor(context) {
     super(context);
     this._apiKey = null;
+    this.contextCompactor = new ContextCompactor({ maxMessages: 40, maxTokens: 60000 });
   }
 
   _getApiKey() {
@@ -83,46 +111,152 @@ export class OpenAICompatibleRuntime extends AgentRuntimeAdapter {
 
     yield { type: 'trace', title: '模型运行时', detail: `调用 ${settings.provider} / ${settings.model}`, status: 'running' };
 
-    try {
-      const baseUrl = settings.baseUrl.replace(/\/+$/, '');
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: settings.model || 'gpt-5.2',
-          messages: [
-            { role: 'system', content: buildSystemPrompt({ skills, memories }) },
-            ...history.slice(-12).map((message) => ({
-              role: message.role === 'assistant' ? 'assistant' : 'user',
-              content: message.content
-            })),
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.2
-        })
-      });
+    // Compact history if needed
+    const { messages: compactedHistory, compacted } = this.contextCompactor.compact(history);
+    if (compacted) {
+      yield {
+        type: 'trace',
+        title: '上下文压缩',
+        detail: `历史记录从 ${history.length} 条压缩至 ${compactedHistory.length} 条`,
+        status: 'ok'
+      };
+    }
 
-      if (!response.ok) {
-        const detail = await response.text();
-        yield { type: 'trace', title: '模型运行时', detail: `HTTP ${response.status} ${detail.slice(0, 300)}`, status: 'error' };
-        yield { type: 'done', detail: '运行完成（模型调用失败）' };
+    const toolList = tools ? Array.from(tools.registry.values()) : [];
+    const hasTools = toolList.length > 0;
+
+    try {
+      let turnCount = 0;
+      const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+
+      // 构建初始消息
+      const conversationMessages = [
+        { role: 'system', content: buildSystemPrompt({ skills, memories, tools: toolList }) },
+        ...compactedHistory.slice(-20).map((message) => ({
+          role: message.role === 'assistant' ? 'assistant' : 'user',
+          content: message.content
+        })),
+        { role: 'user', content: prompt }
+      ];
+
+      while (turnCount < MAX_TURN_LOOPS) {
+        turnCount++;
+
+        const requestBody = {
+          model: settings.model || 'gpt-5.2',
+          messages: conversationMessages,
+          temperature: 0.2
+        };
+
+        // 如果有工具，添加工具定义
+        if (hasTools) {
+          requestBody.tools = toOpenAITools(toolList);
+          requestBody.tool_choice = 'auto';
+        }
+
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const detail = await response.text();
+          yield { type: 'trace', title: '模型运行时', detail: `HTTP ${response.status} ${detail.slice(0, 300)}`, status: 'error' };
+          yield { type: 'done', detail: '运行完成（模型调用失败）' };
+          return;
+        }
+
+        const payload = await response.json();
+        const message = payload?.choices?.[0]?.message;
+
+        // 检查是否有工具调用
+        const toolCalls = message?.tool_calls || [];
+
+        if (toolCalls.length > 0) {
+          // 添加工具调用消息到对话
+          conversationMessages.push(message);
+
+          // 执行工具
+          for (const toolCall of toolCalls) {
+            const toolName = toolCall.function.name;
+            const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+
+            yield {
+              type: 'tool',
+              tool: toolName,
+              status: 'running',
+              detail: `正在执行 ${toolName}...`
+            };
+
+            try {
+              let result;
+              if (tools && tools.has(toolName)) {
+                result = await tools.run(toolName, toolArgs);
+              } else {
+                result = { error: `Unknown tool: ${toolName}` };
+              }
+
+              yield {
+                type: 'tool',
+                tool: toolName,
+                status: 'ok',
+                detail: typeof result === 'object' ? JSON.stringify(result).slice(0, 200) : String(result)
+              };
+
+              // 添加工具结果消息
+              conversationMessages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: typeof result === 'object' ? JSON.stringify(result) : String(result)
+              });
+            } catch (error) {
+              yield {
+                type: 'tool',
+                tool: toolName,
+                status: 'error',
+                detail: error.message
+              };
+
+              conversationMessages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `Error: ${error.message}`
+              });
+            }
+          }
+
+          yield {
+            type: 'trace',
+            title: '工具循环',
+            detail: `已执行 ${toolCalls.length} 个工具调用，继续推理...`,
+            status: 'running'
+          };
+          await wait(160);
+
+          continue;  // 继续循环
+        }
+
+        // 没有工具调用，输出文本
+        const answer = message?.content || '';
+
+        yield { type: 'trace', title: '输出生成', detail: '开始向客户端流式返回结果。', status: 'running' };
+
+        for (const delta of chunkText(answer)) {
+          yield { type: 'assistant.delta', delta };
+          await wait(28);
+        }
+
+        yield { type: 'done', detail: '运行完成' };
         return;
       }
 
-      const payload = await response.json();
-      const answer = payload?.choices?.[0]?.message?.content || '';
-
-      yield { type: 'trace', title: '输出生成', detail: '开始向客户端流式返回结果。', status: 'running' };
-
-      for (const delta of chunkText(answer)) {
-        yield { type: 'assistant.delta', delta };
-        await wait(28);
-      }
-
-      yield { type: 'done', detail: '运行完成' };
+      // 达到最大循环次数
+      yield { type: 'trace', title: '工具循环', detail: `达到最大循环次数 ${MAX_TURN_LOOPS}，强制退出`, status: 'warn' };
+      yield { type: 'done', detail: `运行完成（达到最大循环 ${MAX_TURN_LOOPS}）` };
     } catch (error) {
       yield { type: 'trace', title: '模型运行时', detail: error.message, status: 'error' };
       yield { type: 'done', detail: '运行完成（异常）' };

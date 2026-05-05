@@ -1,237 +1,286 @@
 # Station Agent
 
 <!-- Badge Row -->
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Node](https://img.shields.io/badge/node-%3E%3D18-orange)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-purple)
 
-**本地优先 AI Agent 客户端** — 自研架构，支持多运行时、MCP 协议扩展和 Python Agent Core。
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.2.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/node-%E2%89%A518-orange?style=flat-square" alt="Node">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-purple?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome">
+</p>
+
+<p align="center">
+  <strong>本地优先的 AI Agent 桌面客户端</strong>
+</p>
+
+<p align="center">
+  自研架构，支持多运行时、MCP 协议扩展、Python Agent Core、向量记忆与技能进化
+</p>
+
+<p align="center">
+  <a href="#-快速开始">快速开始</a> ·
+  <a href="#-核心特性">核心特性</a> ·
+  <a href="#-架构设计">架构设计</a> ·
+  <a href="#-API-接口">API</a> ·
+  <a href="#-开发">开发</a>
+</p>
 
 ---
 
-## 功能特性
+## ✨ 核心特性
 
-### 🤖 Agent 循环控制
-状态机驱动的自主执行循环，支持：
-- **检测机制**：相同输出3次 / 语义相似度90% / 最大100次迭代
-- **控制端点**：启动 / 停止 / 暂停 / 恢复
+### 🤖 多运行时适配器
 
-### 🛡️ Harness 运行时保护
-多层运行时保护，防止破坏性操作：
-- **HARD 约束**：禁止删除、覆盖等破坏性操作
-- **SOFT 约束**：高风险操作创建审批请求
-- **快照回滚**：基于文件系统快照的状态恢复
+| 模式 | 描述 | API 依赖 |
+|------|------|---------|
+| `demo` | 本地演示，零配置 | 无 |
+| `remote` | OpenAI 兼容接口 | API Key |
+| `minimax` | MiniMax API + 工具循环 | API Key |
+| `hermes` | Hermes CLI 代理 | Hermes 服务 |
+| `opencowork` | OpenCowork 沙箱 | OpenCowork |
+| `openclaw` | OpenClaw 网关 | OpenClaw |
+
+### 🛡️ 安全防护体系
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    安全层级                               │
+├─────────────────────────────────────────────────────────┤
+│  SSRF 防护      │ validateUrl · safeFetch              │
+│  MCP 参数验证   │ DANGEROUS_FLAGS · 路径遍历拦截        │
+│  Harness 保护   │ HARD/SOFT 约束 · 审批流程            │
+│  命令白名单     │ validateReadOnlyCommand               │
+│  工作区边界     │ validateWorkspacePath                 │
+└─────────────────────────────────────────────────────────┘
+```
 
 ### 🔌 MCP 协议支持
-完整的 Model Context Protocol stdio 实现：
+
+- 完整的 Model Context Protocol stdio 实现
 - 内置 Filesystem MCP（14 个工具）
-- 支持任意 MCP 服务器接入
+- 工具自动发现 + 5 分钟定期刷新
 - JSON-RPC 2.0 + Content-Length 帧
 
-### 🐍 Python Agent Core
-独立的 Python 运行时，JS-Python 通过 stdio JSON-RPC 通信：
-- 5 个内置技能（demo, web_search, url_fetch, code_analysis, memory_summary）
-- TF-IDF 向量记忆系统
-- 沙箱代码执行引擎
+### 🧠 记忆与进化
 
-### ⚡ 渐进式技能加载
-两层缓存架构：
-- **Memory LRU**：20 个热点，30min TTL
-- **SQLite**：持久化全量缓存
-- **进化机制**：失败2次 / 成功5次 / 用户纠正 / 超时后成功
+| 组件 | 功能 |
+|------|------|
+| **向量记忆** | TF-IDF 嵌入 · 余弦相似度搜索 |
+| **技能进化** | AST 代码修改 · 失败重试 · 成功增强 |
+| **快照回滚** | 多版本备份 · 任意时间点恢复 |
 
-### 🧠 记忆系统
-长期记忆 + 向量检索：
-- TF-IDF 嵌入生成
-- 余弦相似度搜索
-- 触发词"记住..."自动创建
+### 📡 多渠道集成
 
-### 📡 多通道连接器
-| 通道 | 连接器 | 状态 |
-|------|--------|------|
-| Mobile | 微信/企微、钉钉 | planned |
-| Remote | Slack、飞书 | planned |
-| Local | 本地浏览器 (MCP) | scaffolded |
+| 渠道 | 状态 |
+|------|------|
+| Slack | ✅ Webhook/Bot |
+| Discord | ✅ Webhook |
+| Telegram | ✅ Bot Polling |
+| Webhook | ✅ 通用 |
+
+### 🔄 Remote Control
+
+Session 跨设备迁移 — 生成迁移票据，在任意设备恢复工作状态。
 
 ---
 
-## 快速开始
+## 🚀 快速开始
+
+### 环境要求
+
+- **Node.js** ≥ 18
+- **Python** 3.10+（用于 Python Agent Core）
+- **macOS / Linux / Windows**
 
 ### 安装
 
 ```bash
+# 克隆项目
 git clone https://github.com/liuyang0508/station-agent.git
 cd station-agent
+
+# 安装依赖
 npm install
-```
 
-### 启动 Web 服务
-
-```bash
-npm start
-```
-
-打开 **http://127.0.0.1:47891**
-
-### 配置模型（可选）
-
-```bash
-export AIAGENT_API_KEY="your-api-key"
-npm start
-```
-
-或在客户端设置页填写：
-- **运行模式**：`remote` 或 `minimax`
-- **Base URL**：例如 `https://api.minimax.io/v1`
-- **Model**：`MiniMax-M2.7`
-
-### 构建 macOS 客户端
-
-```bash
+# 构建 macOS 客户端（可选）
 npm run build:mac
 ```
 
-生成 `dist/macos/AIAgent Client.app`
+### 启动
+
+```bash
+# 默认启动 Web UI
+npm start
+
+# 打开浏览器访问
+open http://127.0.0.1:47891
+```
+
+### 配置模型
+
+```bash
+# 设置 API Key
+export AIAGENT_API_KEY="your-api-key"
+
+# 启动服务
+npm start
+```
+
+或在客户端设置页填写运行模式、Base URL 和 Model。
+
+### CLI 管道模式
+
+```bash
+# 单次任务
+echo "帮我写一个 hello world" | station-agent --cli
+
+# 指定 prompt
+station-agent --cli -p "分析这个日志"
+
+# 交互模式
+station-agent --cli -i
+```
 
 ---
 
-## 技术架构
+## 📐 架构设计
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Station Agent                     │
-├─────────────────────────────────────────────────────┤
-│  Web UI (public/)     │   HTTP API (port 47891)    │
-├─────────────────────────────────────────────────────┤
-│                 Agent Runtime Factory                │
-│  ┌──────────┬──────────┬──────────┬──────────┐     │
-│  │   Demo   │  Remote  │ MiniMax  │ Hermes   │     │
-│  └──────────┴──────────┴──────────┴──────────┘     │
-├─────────────────────────────────────────────────────┤
-│  Agent Loop   │  Harness   │  Skill Cache          │
-├─────────────────────────────────────────────────────┤
-│  MCP Manager  │  Python Bridge  │  Tool Registry     │
-├─────────────────────────────────────────────────────┤
-│  SQLite Store  │  embedding.mjs  │  skillEvolution   │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                         Station Agent                        │
+├────────────────────────────────────────────────────────────┤
+│   Web UI (Vanilla JS)  │  HTTP API (port 47891)           │
+├────────────────────────────────────────────────────────────┤
+│                    Runtime Factory                           │
+│  ┌──────────┬──────────┬──────────┬──────────┬────────┐ │
+│  │   Demo   │  Remote  │ MiniMax  │  Hermes  │ Open.. │ │
+│  └──────────┴──────────┴──────────┴──────────┴────────┘ │
+├────────────────────────────────────────────────────────────┤
+│   AgentLoop   │   Harness   │   SkillCache   │  Context  │
+├────────────────────────────────────────────────────────────┤
+│   MCP Manager  │  PythonBridge  │  ToolRegistry           │
+├────────────────────────────────────────────────────────────┤
+│   SQLite Store  │  embedding.mjs  │  skillEvolution.mjs    │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ### 目录结构
 
 ```
 station-agent/
-├── public/                  # Web UI
+├── public/                     # Web UI (HTML/CSS/JS)
 ├── src/
-│   ├── server.mjs          # HTTP API 服务器
+│   ├── server.mjs             # HTTP API 服务器
 │   ├── runtime/
-│   │   ├── agentLoop.mjs   # 循环控制器
-│   │   ├── harness.mjs     # 运行时保护
-│   │   ├── pythonBridge.mjs # JS-Python IPC
-│   │   └── adapters/       # 运行时适配器
+│   │   ├── agentLoop.mjs      # 循环控制器
+│   │   ├── harness.mjs        # 运行时保护
+│   │   ├── sandboxExecutor.mjs # 沙箱执行器
+│   │   └── adapters/          # 运行时适配器
+│   │       ├── BaseRuntime.mjs
+│   │       ├── BaseRemoteAdapter.mjs
+│   │       ├── MiniMaxRuntime.mjs
+│   │       ├── OpenAICompatibleRuntime.mjs
+│   │       └── ...
 │   └── lib/
-│       ├── mcpProtocol.mjs  # MCP 协议
-│       ├── mcpTransport.mjs # MCP 传输层
-│       ├── embedding.mjs    # 向量生成
-│       └── skillEvolution.mjs # 技能进化
-├── python/agent_core/      # Python Agent Core
+│       ├── mcpManager.mjs      # MCP 服务管理
+│       ├── mcpProtocol.mjs     # MCP 协议
+│       ├── skillEvolution.mjs  # 技能进化引擎
+│       ├── ssrfValidator.mjs    # SSRF 防护
+│       ├── circuitBreaker.mjs   # 熔断器
+│       ├── retry.mjs           # 重试逻辑
+│       ├── logger.mjs          # 结构化日志
+│       ├── remoteControl.mjs   # Session 迁移
+│       ├── channels.mjs        # 多渠道集成
+│       ├── agentSdk.mjs        # Agent SDK
+│       └── routines.mjs         # 云端定时任务
+├── python/agent_core/          # Python Agent Core
 │   ├── agent.py
 │   ├── memory.py
 │   ├── tools.py
 │   └── skills/
-├── macos/                   # macOS 原生壳
-├── scripts/                 # 构建脚本
-└── docs/                    # 架构文档
+├── macos/                      # macOS 原生壳
+├── tests/                      # 测试
+└── docs/                       # 架构文档
 ```
 
 ---
 
-## API 端点
+## 🔌 API 接口
 
 ### Agent 控制
+
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/agent/loop/status` | GET | 获取循环状态 |
-| `/api/agent/loop/start` | POST | 启动循环 |
-| `/api/agent/loop/stop` | POST | 停止循环 |
 | `/api/runs` | POST | 创建任务 |
 | `/api/runs/:id/events` | GET | SSE 事件流 |
+| `/api/runs/:id/cancel` | POST | 取消任务 |
 
-### Harness 保护
+### 安全防护
+
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/harness/status` | GET | 保护状态 |
-| `/api/harness/checkpoint` | POST | 创建检查点 |
-| `/api/harness/rollback` | POST | 回滚 |
-| `/api/harness/constraints` | GET | 约束列表 |
+| `/api/security/validate-url` | POST | URL SSRF 检测 |
+| `/api/mcp/:id/validate` | POST | MCP 参数验证 |
 
-### MCP 协议
+### 定时任务
+
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/mcp` | GET | 列出服务器 |
-| `/api/mcp/:id/tools` | GET | 工具列表 |
-| `/api/mcp/:id/call` | POST | 调用工具 |
+| `/api/routines` | GET/POST | Routine CRUD |
+| `/api/routines/:id/trigger` | POST | 触发执行 |
 
-### Python Agent
+### Remote Control
+
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/python/skills` | GET | 技能列表 |
-| `/api/python/skills/run` | POST | 运行技能 |
-| `/api/python/memories` | GET/POST | 记忆管理 |
-| `/api/agent/stream` | GET | SSE 流式响应 |
-
-### 技能中心
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/skills` | GET | 技能列表 |
-| `/api/skills/cache/status` | GET | 缓存状态 |
-| `/api/skills/:id/evolution` | GET/POST | 进化历史 |
-
-### 记忆系统
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/memories` | GET/POST | 记忆CRUD |
-| `/api/memories/search` | POST | 向量检索 |
+| `/api/teleport/ticket` | POST | 创建迁移票据 |
+| `/api/teleport/tickets` | GET | 列出票据 |
+| `/api/teleport/redeem` | POST | 使用票据恢复 |
 
 ---
 
-## 运行模式
-
-| 模式 | 说明 | 依赖 |
-|------|------|------|
-| `demo` | 本地演示，无需 API | 无 |
-| `remote` | OpenAI-compatible API | API Key |
-| `minimax` | MiniMax API | API Key |
-| `hermes` | Hermes CLI 集成 | hermes |
-| `sandbox` | WSL2/Lima/Docker | 容器环境 |
-
----
-
-## 诊断命令
+## 🧪 开发
 
 ```bash
-# 健康检查
-curl http://127.0.0.1:47891/api/health
+# 开发模式（热重载）
+npm run dev
 
-# Agent Loop 状态
-curl http://127.0.0.1:47891/api/agent/loop/status
+# 运行测试
+npm test
 
-# Harness 状态
-curl http://127.0.0.1:47891/api/harness/status
+# 语法检查
+npm run lint
 
-# MCP 服务器
-curl http://127.0.0.1:47891/api/mcp
+# 构建 macOS
+npm run build:mac
+```
 
-# Python 技能
-curl http://127.0.0.1:47891/api/python/skills
+### 测试
 
-# 技能缓存
-curl http://127.0.0.1:47891/api/skills/cache/status
+```bash
+# 核心组件测试
+node --test tests/core.test.mjs
+
+# 增强功能测试
+node --test tests/enhancements.test.mjs
 ```
 
 ---
 
-## 常见问题
+## 📊 定时任务 cadence
+
+| 格式 | 说明 | 示例 |
+|------|------|------|
+| `daily HH:MM` | 每天定点 | `daily 09:00` |
+| `weekday HH:MM` | 工作日定点 | `weekday 18:30` |
+| `weekly DAY HH:MM` | 每周定点 | `weekly mon 09:00` |
+| `monthly DD HH:MM` | 每月定点 | `monthly 1 09:00` |
+| `every N min` | 间隔执行 | `every 30 min` |
+
+---
+
+## ❓ FAQ
 
 **Q: API Key 不生效**
 A: 确保 `export AIAGENT_API_KEY="..."` 在 `npm start` 之前执行，或在客户端设置页直接填写。
@@ -239,29 +288,15 @@ A: 确保 `export AIAGENT_API_KEY="..."` 在 `npm start` 之前执行，或在�
 **Q: 模型返回 demo 模式回复**
 A: 检查 Base URL 是否正确（MiniMax 用 `https://api.minimax.io/v1`），确认重启服务后刷新页面。
 
-**Q: 技能上传失败**
-A: 确保上传的是 `.zip`/`.json`/`.md`/`.mjs` 等支持的文件格式，路径不含特殊字符。
-
 **Q: 服务启动报错 EADDRINUSE**
 A: 端口 47891 被占用，执行 `lsof -ti:47891 | xargs kill -9` 后重试。
 
 ---
 
-## 开发
+## 📄 License
 
-```bash
-# 开发模式
-npm run dev
+MIT License · Copyright © 2024
 
-# 测试
-npm test
-
-# 构建 macOS
-npm run build:mac
-```
-
----
-
-## License
-
-MIT
+<p align="center">
+  <sub>如果这个项目对你有帮助，欢迎 ⭐ Star</sub>
+</p>

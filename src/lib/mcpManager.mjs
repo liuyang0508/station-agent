@@ -7,9 +7,41 @@ import { McpTransport, createTransportFromProcess } from './mcpTransport.mjs';
 const ALLOWED_MCP_EXECUTABLES = new Set(['node', 'npx', 'uvx', 'python', 'python3']);
 const MAX_LOG_BYTES = 48 * 1024;
 
+// Dangerous flags that allow code execution - blocked in MCP args
+const DANGEROUS_FLAGS = {
+  node: ['--eval', '-e', '--check', '-c', '--print', '-p'],
+  npx: ['--eval', '-e'],
+  python: ['-c', '--command', '-m' /* restrict dangerous modules */],
+  python3: ['-c', '--command', '-m'],
+  uvx: []
+};
+
 function appendLog(existing, chunk) {
   const next = `${existing || ''}${chunk.toString('utf8')}`;
   return next.length > MAX_LOG_BYTES ? next.slice(-MAX_LOG_BYTES) : next;
+}
+
+function validateArgs(args, executable) {
+  if (!Array.isArray(args)) {
+    return { allowed: false, reason: 'MCP args must be an array' };
+  }
+  const dangerous = DANGEROUS_FLAGS[executable] || [];
+  for (const arg of args) {
+    const argStr = String(arg);
+    // Block dangerous flags
+    if (dangerous.some(d => argStr === d || argStr.startsWith(d + '='))) {
+      return { allowed: false, reason: `MCP args contains dangerous flag: ${argStr}` };
+    }
+    // Block path traversal
+    if (argStr.includes('..') || argStr.includes(';;') || /[;&|`$]/.test(argStr)) {
+      return { allowed: false, reason: `MCP args contains suspicious characters: ${argStr}` };
+    }
+    // Block inline code execution patterns
+    if (argStr.includes('eval(') || argStr.includes('exec(') || argStr.includes('__import__')) {
+      return { allowed: false, reason: `MCP args contains code execution pattern` };
+    }
+  }
+  return { allowed: true };
 }
 
 export function validateMcpConfig(server, workspaceRoot) {
@@ -25,6 +57,9 @@ export function validateMcpConfig(server, workspaceRoot) {
       reason: `MCP 服务启动器必须是 ${Array.from(ALLOWED_MCP_EXECUTABLES).join(', ')}`
     };
   }
+  // Validate args array for injection attacks
+  const argsValidation = validateArgs(server.args || [], executable);
+  if (!argsValidation.allowed) return argsValidation;
   const cwdValidation = validateWorkspacePath(workspaceRoot, server.cwd || workspaceRoot);
   if (!cwdValidation.allowed) return cwdValidation;
   return {
@@ -43,6 +78,8 @@ export class McpManager {
     this.protocols = new Map();
     this.transports = new Map();
     this.toolCache = new Map();
+    this.refreshIntervals = new Map();  // 定期刷新定时器
+    this.refreshIntervalMs = 5 * 60 * 1000;  // 默认 5 分钟刷新一次
   }
 
   snapshot(serverId) {
@@ -137,7 +174,39 @@ export class McpManager {
       throw error;
     }
 
+    // Setup periodic tool refresh
+    this._setupPeriodicRefresh(serverId);
+
     return { ok: true, status: 'running', pid: child.pid };
+  }
+
+  /**
+   * 设置定期工具刷新
+   */
+  _setupPeriodicRefresh(serverId) {
+    // 清除已有的定时器
+    this._clearPeriodicRefresh(serverId);
+
+    // 设置新的定时器
+    this.refreshIntervals.set(serverId, setInterval(async () => {
+      try {
+        const tools = await this.discoverTools(serverId);
+        console.log(`[MCP] ${serverId} 工具已刷新，当前 ${tools.length} 个工具`);
+      } catch (error) {
+        console.warn(`[MCP] ${serverId} 工具刷新失败: ${error.message}`);
+      }
+    }, this.refreshIntervalMs));
+  }
+
+  /**
+   * 清除定期刷新定时器
+   */
+  _clearPeriodicRefresh(serverId) {
+    const interval = this.refreshIntervals.get(serverId);
+    if (interval) {
+      clearInterval(interval);
+      this.refreshIntervals.delete(serverId);
+    }
   }
 
   async performHandshake(serverId) {
@@ -194,6 +263,9 @@ export class McpManager {
     if (!server) {
       throw new Error('MCP 服务不存在');
     }
+    // 清除定期刷新定时器
+    this._clearPeriodicRefresh(serverId);
+
     const info = this.processes.get(serverId);
     if (info) {
       info.transport?.close();
@@ -213,6 +285,7 @@ export class McpManager {
     this.processes.delete(serverId);
     this.protocols.delete(serverId);
     this.transports.delete(serverId);
+    this.toolCache.delete(serverId);
   }
 
   getTools(serverId) {
