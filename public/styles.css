@@ -420,8 +420,14 @@ select:focus-visible {
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message.user {
@@ -432,6 +438,8 @@ select:focus-visible {
 
 .message.assistant {
   margin-right: auto;
+  border-left: 2px solid var(--primary);
+  border-top-left-radius: 4px;
 }
 
 .message-role {
