@@ -80,6 +80,55 @@ class Toast {
   static info(msg, duration) { this.show(msg, 'info', duration); }
 }
 
+// ── Modal Dialog System ──
+class Modal {
+  static overlay = null;
+
+  static init() {
+    this.overlay = document.getElementById('modalOverlay');
+    document.getElementById('modalCloseBtn').addEventListener('click', () => this.hide());
+    this.overlay.addEventListener('click', (e) => {
+      if (e.target === this.overlay) this.hide();
+    });
+  }
+
+  static show({ title, body, footer, onClose } = {}) {
+    if (!this.overlay) this.init();
+    document.getElementById('modalTitle').textContent = title || '';
+    document.getElementById('modalBody').innerHTML = body || '';
+    document.getElementById('modalFooter').innerHTML = footer || '';
+    this.overlay.classList.add('visible');
+    this._onClose = onClose;
+    document.body.style.overflow = 'hidden';
+  }
+
+  static hide() {
+    if (!this.overlay) return;
+    this.overlay.classList.remove('visible');
+    document.body.style.overflow = '';
+    if (this._onClose) { this._onClose(); this._onClose = null; }
+  }
+
+  static confirm(message, onConfirm, onCancel) {
+    this.show({
+      title: '确认操作',
+      body: `<p>${message}</p>`,
+      footer: `
+        <button class="modal-btn secondary" id="modalCancel">取消</button>
+        <button class="modal-btn primary" id="modalConfirm">确认</button>
+      `
+    });
+    document.getElementById('modalCancel').addEventListener('click', () => {
+      this.hide();
+      if (onCancel) onCancel();
+    });
+    document.getElementById('modalConfirm').addEventListener('click', () => {
+      this.hide();
+      if (onConfirm) onConfirm();
+    });
+  }
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: {
@@ -1238,6 +1287,7 @@ function bindEvents() {
 async function init() {
   bindEvents();
   Toast.init();
+  Modal.init();
   try {
     await loadBaseData();
     // Initialize tabs from sessions
