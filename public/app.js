@@ -28,6 +28,99 @@ const state = {
   currentRunId: null
 };
 
+// ── Command Palette Data ──
+const PALETTE_COMMANDS = [
+  {
+    group: '会话',
+    items: [
+      { id: 'new-session', label: '新会话', icon: '✨', shortcut: '⌘N', action: () => newSession() },
+      { id: 'export-session', label: '导出会话', icon: '📤', action: () => exportCurrentSession() },
+      { id: 'clear-session', label: '清空当前会话', icon: '🗑', action: () => clearCurrentSession() },
+    ]
+  },
+  {
+    group: '导航',
+    items: [
+      { id: 'nav-chat', label: '切换到指挥台', icon: '💬', shortcut: '⌘1', action: () => switchView('chat') },
+      { id: 'nav-skills', label: '切换到技能中心', icon: '🛠', shortcut: '⌘2', action: () => switchView('skills') },
+      { id: 'nav-settings', label: '切换到设置', icon: '⚙️', shortcut: '⌘,', action: () => switchView('settings') },
+      { id: 'nav-workspace', label: '切换到工作区', icon: '📁', action: () => switchView('workspace') },
+    ]
+  },
+  {
+    group: '操作',
+    items: [
+      { id: 'toggle-theme', label: '切换主题', icon: '🎨', action: () => Toast.info('主题切换功能开发中') },
+      { id: 'shortcuts-help', label: '快捷键帮助', icon: '⌨️', shortcut: '⌘/', action: () => showShortcutsHelp() },
+    ]
+  }
+];
+
+let selectedIndex = 0;
+let flatItems = [];
+
+function showPalette() {
+  const overlay = document.getElementById('commandPaletteOverlay') || createPaletteOverlay();
+  overlay.classList.add('visible');
+  const input = document.getElementById('paletteInput');
+  input.value = '';
+  input.focus();
+  renderPaletteResults('');
+  selectedIndex = 0;
+}
+
+function hidePalette() {
+  const overlay = document.getElementById('commandPaletteOverlay');
+  if (overlay) overlay.classList.remove('visible');
+}
+
+function renderPaletteResults(query) {
+  const results = document.getElementById('paletteResults');
+  flatItems = [];
+  PALETTE_COMMANDS.forEach(group => {
+    const matched = group.items.filter(item =>
+      item.label.toLowerCase().includes(query.toLowerCase())
+    );
+    matched.forEach(item => flatItems.push({ ...item, group: group.group }));
+  });
+
+  if (flatItems.length === 0) {
+    results.innerHTML = '<div class="palette-empty">没有找到匹配的命令</div>';
+    return;
+  }
+
+  results.innerHTML = flatItems.map((item, i) => `
+    <div class="palette-item ${i === selectedIndex ? 'selected' : ''}" data-index="${i}">
+      <div class="palette-item-icon">${item.icon}</div>
+      <span class="palette-label">${item.label}</span>
+      ${item.shortcut ? `<div class="palette-shortcut"><kbd>${item.shortcut}</kbd></div>` : ''}
+    </div>
+  `).join('');
+
+  results.querySelectorAll('.palette-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.dataset.index);
+      flatItems[idx].action();
+      hidePalette();
+    });
+  });
+}
+
+function clearCurrentSession() {
+  state.messages = [];
+  renderMessages();
+}
+
+function showShortcutsHelp() {
+  // Placeholder - will be implemented in Task 11
+  Toast.info('快捷键帮助功能开发中');
+}
+
+function switchView(view) {
+  state.activeView = view;
+  renderViews();
+}
+
 const $ = (selector) => document.querySelector(selector);
 
 // ── Toast Notification System ──
@@ -1177,9 +1270,35 @@ function bindEvents() {
   });
 
   // Palette input handler
-  $('#paletteInput')?.addEventListener('input', (e) => {
-    renderPaletteResults(e.target.value);
-  });
+  const paletteInput = $('#paletteInput');
+  if (paletteInput) {
+    paletteInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedIndex = Math.min(selectedIndex + 1, flatItems.length - 1);
+        renderPaletteResults(paletteInput.value);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        renderPaletteResults(paletteInput.value);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (flatItems[selectedIndex]) flatItems[selectedIndex].action();
+        hidePalette();
+      } else if (e.key === 'Escape') {
+        hidePalette();
+      } else {
+        // Search
+        selectedIndex = 0;
+        renderPaletteResults(paletteInput.value);
+      }
+    });
+
+    paletteInput.addEventListener('input', (e) => {
+      selectedIndex = 0;
+      renderPaletteResults(e.target.value);
+    });
+  }
 
   // Palette backdrop closes it
   $('.palette-backdrop')?.addEventListener('click', () => {
@@ -1388,118 +1507,21 @@ function renderTabs() {
 
 // ── Command Palette ──
 function toggleCommandPalette() {
-  state.commandPaletteOpen = !state.commandPaletteOpen;
-  const palette = $('#commandPalette');
-  if (palette) {
-    palette.classList.toggle('visible', state.commandPaletteOpen);
-    if (state.commandPaletteOpen) {
-      $('#paletteInput').focus();
-      $('#paletteInput').value = '';
-      $('#paletteResults').innerHTML = '';
+  const overlay = $('#commandPaletteOverlay');
+  if (!overlay) return;
+
+  const isVisible = overlay.classList.contains('visible');
+  if (isVisible) {
+    overlay.classList.remove('visible');
+  } else {
+    overlay.classList.add('visible');
+    const input = $('#paletteInput');
+    if (input) {
+      input.value = '';
+      input.focus();
+      renderPaletteResults('');
+      selectedIndex = 0;
     }
-  }
-}
-
-function renderPaletteResults(query) {
-  const commands = [
-    { id: 'new-session', label: '新会话', detail: 'Cmd+T', shortcut: '⌘T' },
-    { id: 'close-tab', label: '关闭当前标签页', detail: 'Cmd+W', shortcut: '⌘W' },
-    { id: 'export', label: '导出会话', detail: '导出为 Markdown', shortcut: '⌘S' },
-    { id: 'settings', label: '打开设置', detail: '打开运行设置面板', shortcut: '⌘,' },
-    { id: 'search', label: '搜索', detail: '搜索会话和记忆', shortcut: '⌘L' },
-    { id: 'toggle-sidebar', label: '切换侧边栏', detail: '显示/隐藏侧边栏', shortcut: '⌘/' },
-    { id: 'toggle-thinking', label: '切换思考过程面板', detail: '显示/隐藏思考过程', shortcut: '' },
-    { id: 'clear-session', label: '清空当前会话', detail: '清除消息历史', shortcut: '' },
-    { id: 'token-budget', label: '查看 Token 预算', detail: '查看 24h 用量统计', shortcut: '' },
-    { id: 'mcp-start', label: '启动 MCP 服务', detail: '启动本地 MCP 服务', shortcut: '' },
-    { id: 'skills-center', label: '技能中心', detail: '管理已安装技能', shortcut: '' },
-    { id: 'memory-manager', label: '记忆管理', detail: '管理长期记忆', shortcut: '' },
-    { id: 'workspace', label: '工作区', detail: '浏览工作区文件', shortcut: '' },
-    { id: 'approval-queue', label: '审批队列', detail: '查看待处理审批', shortcut: '' },
-  ];
-
-  const q = query.toLowerCase().trim();
-  const filtered = q
-    ? commands.filter(c =>
-        c.label.toLowerCase().includes(q) ||
-        c.detail.toLowerCase().includes(q))
-    : commands.slice(0, 8);
-
-  $('#paletteResults').innerHTML = filtered.map(cmd => `
-    <button class="palette-item" data-cmd="${cmd.id}" type="button">
-      <span class="palette-label">${escapeText(cmd.label)}</span>
-      <span class="palette-detail">${escapeText(cmd.detail)}</span>
-      ${cmd.shortcut ? `<kbd>${cmd.shortcut}</kbd>` : ''}
-    </button>
-  `).join('');
-
-  document.querySelectorAll('.palette-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      executePaletteCommand(btn.dataset.cmd);
-    });
-  });
-}
-
-async function executePaletteCommand(cmdId) {
-  state.commandPaletteOpen = false;
-  const palette = $('#commandPalette');
-  if (palette) palette.classList.remove('visible');
-
-  switch (cmdId) {
-    case 'new-session':
-      await newSession();
-      break;
-    case 'close-tab':
-      closeActiveTab();
-      break;
-    case 'export':
-      exportCurrentSession();
-      break;
-    case 'settings':
-      state.activeView = 'settings';
-      renderViews();
-      break;
-    case 'search':
-      state.activeView = 'search';
-      renderViews();
-      break;
-    case 'toggle-sidebar':
-      toggleSidebar();
-      break;
-    case 'toggle-thinking':
-      const tp = $('#thinkingContent');
-      if (tp) tp.classList.toggle('visible');
-      break;
-    case 'clear-session':
-      // Clear local messages only
-      state.messages = [];
-      renderMessages();
-      break;
-    case 'token-budget':
-      state.activeView = 'settings';
-      renderViews();
-      setTimeout(renderTokenBudget, 100);
-      break;
-    case 'mcp-start':
-      state.activeView = 'mcp';
-      renderViews();
-      break;
-    case 'skills-center':
-      state.activeView = 'skills';
-      renderViews();
-      break;
-    case 'memory-manager':
-      state.activeView = 'memory';
-      renderViews();
-      break;
-    case 'workspace':
-      state.activeView = 'workspace';
-      renderViews();
-      break;
-    case 'approval-queue':
-      state.activeView = 'security';
-      renderViews();
-      break;
   }
 }
 

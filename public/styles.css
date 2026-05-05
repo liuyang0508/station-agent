@@ -1279,6 +1279,12 @@ select:focus-visible {
 
 .command-palette-overlay.visible {
   display: flex;
+  animation: palette-overlay-in 150ms ease-out;
+}
+
+@keyframes palette-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .palette-backdrop {
@@ -1286,17 +1292,30 @@ select:focus-visible {
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .palette-dialog {
   position: relative;
-  width: 560px;
+  width: 580px;
   max-width: 90vw;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--bg-surface);
-  box-shadow: var(--shadow-md), var(--shadow-glow);
+  box-shadow: var(--shadow-lg), var(--shadow-glow-strong);
   overflow: hidden;
+  animation: palette-dialog-in 200ms ease-out;
+}
+
+@keyframes palette-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .palette-input {
@@ -1309,16 +1328,26 @@ select:focus-visible {
   padding: 16px 20px;
   font-size: 15px;
   outline: none;
+  box-sizing: border-box;
 }
 
-.palette-input::placeholder {
-  color: var(--text-muted);
+.palette-input:focus {
+  background: var(--bg-elevated);
 }
 
 .palette-results {
-  max-height: 360px;
+  max-height: 380px;
   overflow-y: auto;
   padding: 8px;
+}
+
+.palette-group-label {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .palette-item {
@@ -1334,11 +1363,24 @@ select:focus-visible {
   text-align: left;
   cursor: pointer;
   font-size: 13.5px;
-  transition: background 100ms;
+  transition: background var(--transition-fast);
 }
 
-.palette-item:hover {
+.palette-item:hover,
+.palette-item.selected {
   background: var(--bg-elevated);
+}
+
+.palette-item-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .palette-label {
@@ -1346,9 +1388,9 @@ select:focus-visible {
   font-weight: 500;
 }
 
-.palette-detail {
-  color: var(--text-muted);
-  font-size: 12px;
+.palette-shortcut {
+  display: flex;
+  gap: 4px;
 }
 
 .palette-item kbd {
@@ -1359,6 +1401,13 @@ select:focus-visible {
   font-size: 11px;
   color: var(--text-muted);
   font-family: inherit;
+}
+
+.palette-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 /* ─── Diff Viewer ─── */
