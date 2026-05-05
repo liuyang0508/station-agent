@@ -112,8 +112,72 @@ function clearCurrentSession() {
 }
 
 function showShortcutsHelp() {
-  // Placeholder - will be implemented in Task 11
-  Toast.info('快捷键帮助功能开发中');
+  Modal.show({
+    title: '快捷键',
+    body: `
+      <div style="display:grid;gap:8px;">
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-secondary)">命令面板</span>
+          <kbd style="background:var(--bg-elevated);padding:2px 8px;border-radius:4px;font-size:12px;">⌘K</kbd>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-secondary)">新会话</span>
+          <kbd style="background:var(--bg-elevated);padding:2px 8px;border-radius:4px;font-size:12px;">⌘N</kbd>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-secondary)">快捷键帮助</span>
+          <kbd style="background:var(--bg-elevated);padding:2px 8px;border-radius:4px;font-size:12px;">⌘/</kbd>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-secondary)">关闭弹窗</span>
+          <kbd style="background:var(--bg-elevated);padding:2px 8px;border-radius:4px;font-size:12px;">Esc</kbd>
+        </div>
+      </div>
+    `,
+    footer: '<button class="modal-btn primary" id="modalCloseHelp">好的</button>'
+  });
+  document.getElementById('modalCloseHelp').addEventListener('click', () => Modal.hide());
+}
+
+function setupGlobalShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+
+    // Cmd/Ctrl+K - 命令面板
+    if (mod && e.key === 'k') {
+      e.preventDefault();
+      showPalette();
+      return;
+    }
+
+    // Cmd/Ctrl+N - 新会话
+    if (mod && e.key === 'n') {
+      e.preventDefault();
+      newSession();
+      return;
+    }
+
+    // Cmd/Ctrl+/ 或 Ctrl+? - 快捷键帮助
+    if (mod && (e.key === '/' || e.key === '?')) {
+      e.preventDefault();
+      showShortcutsHelp();
+      return;
+    }
+
+    // Escape - 关闭面板
+    if (e.key === 'Escape') {
+      const palette = document.getElementById('commandPaletteOverlay');
+      if (palette?.classList.contains('visible')) {
+        hidePalette();
+        return;
+      }
+      if (document.getElementById('modalOverlay')?.classList.contains('visible')) {
+        Modal.hide();
+        return;
+      }
+    }
+  });
 }
 
 function switchView(view) {
@@ -1407,6 +1471,7 @@ async function init() {
   bindEvents();
   Toast.init();
   Modal.init();
+  setupGlobalShortcuts();
   try {
     await loadBaseData();
     // Initialize tabs from sessions
