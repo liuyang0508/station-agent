@@ -136,12 +136,19 @@ select:focus-visible {
 .brand-mark {
   width: 36px;
   height: 36px;
-  animation: pulse-glow 2s ease-in-out infinite;
+  animation: brand-glow 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.3));
 }
 
-@keyframes pulse-glow {
-  0%, 100% { filter: drop-shadow(0 0 4px var(--accent-glow)); }
-  50% { filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.35)); }
+@keyframes brand-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.2))
+            drop-shadow(0 0 8px rgba(168, 85, 247, 0.1));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.4))
+            drop-shadow(0 0 24px rgba(168, 85, 247, 0.2));
+  }
 }
 
 .brand-name {
