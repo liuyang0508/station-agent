@@ -195,6 +195,29 @@ function renderMessages() {
       `
     )
     .join('');
+
+  // Apply syntax highlighting to code blocks
+  if (typeof hljs !== 'undefined') {
+    feed.querySelectorAll('pre code').forEach((block) => {
+      hljs.highlightElement(block);
+    });
+  }
+
+  // Add copy button to each code block
+  feed.querySelectorAll('pre').forEach((pre) => {
+    const btn = document.createElement('button');
+    btn.className = 'copy-code-btn';
+    btn.textContent = '复制';
+    btn.addEventListener('click', () => {
+      const code = pre.querySelector('code')?.textContent || '';
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = '已复制';
+        setTimeout(() => { btn.textContent = '复制'; }, 2000);
+      });
+    });
+    pre.appendChild(btn);
+  });
+
   feed.scrollTop = feed.scrollHeight;
 }
 
@@ -1395,3 +1418,8 @@ function exportCurrentSession() {
 }
 
 init();
+
+// Initialize highlight.js
+if (typeof hljs !== 'undefined') {
+  hljs.highlightAll();
+}
