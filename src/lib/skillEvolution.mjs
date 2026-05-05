@@ -367,6 +367,104 @@ export class SkillEvolution {
     }
     return entries;
   }
+  /**
+   * Rollback a skill from an evolution entry
+   */
+  async rollbackSkill(skillId, evolutionEntryId) {
+    const skill = this.store.listSkills().find(s => s.id === skillId);
+    if (!skill) {
+      return { success: false, error: 'Skill not found' };
+    }
+
+    if (!skill.entrypoint) {
+      return { success: false, error: 'Skill has no entrypoint to rollback' };
+    }
+
+    const entries = this.getEvolutionHistory(skillId);
+    const entry = entries.find(e => e.id === evolutionEntryId);
+
+    if (!entry) {
+      return { success: false, error: 'Evolution entry not found' };
+    }
+
+    if (!entry.result || !entry.result.backupPath) {
+      return { success: false, error: 'No backup found for this evolution entry' };
+    }
+
+    const backupPath = entry.result.backupPath;
+
+    if (!fs.existsSync(backupPath)) {
+      return { success: false, error: `Backup file not found: ${backupPath}` };
+    }
+
+    try {
+      const backupContent = fs.readFileSync(backupPath, 'utf8');
+
+      const currentBackup = skill.entrypoint + '.rollback.' + Date.now();
+      if (fs.existsSync(skill.entrypoint)) {
+        fs.writeFileSync(currentBackup, fs.readFileSync(skill.entrypoint, 'utf8'), 'utf8');
+      }
+
+      fs.writeFileSync(skill.entrypoint, backupContent, 'utf8');
+
+      const metadata = skill.metadata || {};
+      metadata.lastRollbackAt = new Date().toISOString();
+      metadata.lastRollbackFrom = evolutionEntryId;
+      skill.metadata = metadata;
+      skill.updatedAt = new Date().toISOString();
+
+      if (skill.description.startsWith('[优化] ')) {
+        skill.description = skill.description.slice(5);
+      }
+
+      this.store.updateSkill(skill);
+
+      return {
+        success: true,
+        message: `Rolled back ${skill.name} to version from ${new Date(entry.createdAt).toLocaleString()}`,
+        currentBackup
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * List available backups for a skill
+   */
+  listBackups(skillId) {
+    const skill = this.store.listSkills().find(s => s.id === skillId);
+    if (!skill || !skill.entrypoint) {
+      return [];
+    }
+
+    const entrypointDir = path.dirname(skill.entrypoint);
+    const entrypointName = path.basename(skill.entrypoint);
+
+    try {
+      const files = fs.readdirSync(entrypointDir);
+      const backups = files
+        .filter(f => f.startsWith(entrypointName) && (f.includes('.backup.') || f.includes('.evolved.') || f.includes('.rollback.')))
+        .map(f => {
+          const fullPath = path.join(entrypointDir, f);
+          const stat = fs.statSync(fullPath);
+          const type = f.includes('.backup.') ? 'backup' : f.includes('.evolved.') ? 'evolved' : 'rollback';
+          return {
+            path: fullPath,
+            name: f,
+            type,
+            size: stat.size,
+            createdAt: stat.birthtime.toISOString()
+          };
+        })
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      return backups;
+    } catch {
+      return [];
+    }
+  }
+
 }
 
 /**

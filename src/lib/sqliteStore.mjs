@@ -271,9 +271,14 @@ export class SqliteStore {
   }
 
   _mapSession(row) {
+    if (!row) return null;
     return {
-      id: row.id, title: row.title, workspaceRoot: row.workspace_root,
-      status: row.status, createdAt: row.created_at, updatedAt: row.updated_at
+      id: row.id ?? null,
+      title: row.title ?? '未知会话',
+      workspaceRoot: row.workspace_root ?? '',
+      status: row.status ?? 'idle',
+      createdAt: row.created_at ?? null,
+      updatedAt: row.updated_at ?? null
     };
   }
 
@@ -306,9 +311,18 @@ export class SqliteStore {
   }
 
   _mapMessage(row) {
+    if (!row) return null;
+    let trace = [];
+    if (row.trace) {
+      try { trace = JSON.parse(row.trace); } catch { trace = []; }
+    }
     return {
-      id: row.id, sessionId: row.session_id, role: row.role, content: row.content,
-      trace: row.trace ? JSON.parse(row.trace) : [], createdAt: row.created_at
+      id: row.id ?? null,
+      sessionId: row.session_id ?? null,
+      role: row.role ?? 'unknown',
+      content: row.content ?? '',
+      trace,
+      createdAt: row.created_at ?? null
     };
   }
 
@@ -331,12 +345,23 @@ export class SqliteStore {
   }
 
   _mapSkill(row) {
+    if (!row) return null;
+    let args = [];
+    let metadata = {};
+    if (row.args) { try { args = JSON.parse(row.args); } catch { args = []; } }
+    if (row.metadata) { try { metadata = JSON.parse(row.metadata); } catch { metadata = {}; } }
     return {
-      id: row.id, name: row.name, description: row.description, source: row.source,
-      entrypoint: row.entrypoint, command: row.command,
-      args: row.args ? JSON.parse(row.args) : [],
-      metadata: row.metadata ? JSON.parse(row.metadata) : {},
-      enabled: Boolean(row.enabled), installedAt: row.installed_at, updatedAt: row.updated_at
+      id: row.id ?? null,
+      name: row.name ?? '未命名技能',
+      description: row.description ?? '',
+      source: row.source ?? 'unknown',
+      entrypoint: row.entrypoint ?? '',
+      command: row.command ?? '',
+      args,
+      metadata,
+      enabled: Boolean(row.enabled),
+      installedAt: row.installed_at ?? null,
+      updatedAt: row.updated_at ?? null
     };
   }
 
@@ -372,16 +397,34 @@ export class SqliteStore {
     const sql = skillId
       ? 'SELECT * FROM skill_runs WHERE skill_id = ? ORDER BY created_at DESC'
       : 'SELECT * FROM skill_runs ORDER BY created_at DESC';
-    return this.db.prepare(sql).all(skillId || undefined).map(row => ({
-      id: row.id, skillId: row.skill_id, skillName: row.skill_name, status: row.status,
-      input: row.input ? JSON.parse(row.input) : {}, output: row.output, error: row.error, createdAt: row.created_at
-    }));
+    return this.db.prepare(sql).all(skillId || undefined).map(row => {
+      if (!row) return null;
+      let input = {};
+      if (row.input) { try { input = JSON.parse(row.input); } catch { input = {}; } }
+      return {
+        id: row.id ?? null,
+        skillId: row.skill_id ?? null,
+        skillName: row.skill_name ?? '',
+        status: row.status ?? 'unknown',
+        input,
+        output: row.output ?? '',
+        error: row.error ?? '',
+        createdAt: row.created_at ?? null
+      };
+    });
   }
 
   listConnectors() {
-    return this.db.prepare('SELECT * FROM connectors').all().map(row => ({
-      id: row.id, name: row.name, status: row.status, channel: row.channel, source: row.source
-    }));
+    return this.db.prepare('SELECT * FROM connectors').all().map(row => {
+      if (!row) return null;
+      return {
+        id: row.id ?? null,
+        name: row.name ?? '未知连接器',
+        status: row.status ?? 'unknown',
+        channel: row.channel ?? '',
+        source: row.source ?? 'unknown'
+      };
+    }).filter(Boolean);
   }
 
   listMcpServers() {
@@ -390,12 +433,25 @@ export class SqliteStore {
   }
 
   _mapMcpServer(row) {
+    if (!row) return null;
+    let args = [];
+    let env = {};
+    if (row.args) { try { args = JSON.parse(row.args); } catch { args = []; } }
+    if (row.env) { try { env = JSON.parse(row.env); } catch { env = {}; } }
     return {
-      id: row.id, name: row.name, command: row.command,
-      args: row.args ? JSON.parse(row.args) : [], cwd: row.cwd, env: row.env ? JSON.parse(row.env) : {},
-      enabled: Boolean(row.enabled), status: row.status, source: row.source,
-      toolCount: row.tool_count || 0, lastDiscoveredAt: row.last_discovered_at,
-      createdAt: row.created_at, updatedAt: row.updated_at
+      id: row.id ?? null,
+      name: row.name ?? '未命名服务器',
+      command: row.command ?? '',
+      args,
+      cwd: row.cwd ?? '',
+      env,
+      enabled: Boolean(row.enabled),
+      status: row.status ?? 'stopped',
+      source: row.source ?? 'unknown',
+      toolCount: row.tool_count || 0,
+      lastDiscoveredAt: row.last_discovered_at ?? null,
+      createdAt: row.created_at ?? null,
+      updatedAt: row.updated_at ?? null
     };
   }
 
@@ -455,12 +511,24 @@ export class SqliteStore {
   }
 
   _mapApproval(row) {
+    if (!row) return null;
+    let payload = {};
+    let result = {};
+    if (row.payload) { try { payload = JSON.parse(row.payload); } catch { payload = {}; } }
+    if (row.result) { try { result = JSON.parse(row.result); } catch { result = {}; } }
     return {
-      id: row.id, title: row.title, detail: row.detail, kind: row.kind,
-      payload: row.payload ? JSON.parse(row.payload) : {}, risk: row.risk, status: row.status,
-      decidedBy: row.decided_by, decidedAt: row.decided_at,
-      result: row.result ? JSON.parse(row.result) : {},
-      createdAt: row.created_at, updatedAt: row.updated_at
+      id: row.id ?? null,
+      title: row.title ?? '未知审批',
+      detail: row.detail ?? '',
+      kind: row.kind ?? 'generic',
+      payload,
+      risk: row.risk ?? 'medium',
+      status: row.status ?? 'pending',
+      decidedBy: row.decided_by ?? null,
+      decidedAt: row.decided_at ?? null,
+      result,
+      createdAt: row.created_at ?? null,
+      updatedAt: row.updated_at ?? null
     };
   }
 
@@ -502,10 +570,18 @@ export class SqliteStore {
   }
 
   _mapMemory(row) {
+    if (!row) return null;
+    let tags = [];
+    if (row.tags) { try { tags = JSON.parse(row.tags); } catch { tags = []; } }
     return {
-      id: row.id, title: row.title, content: row.content,
-      tags: row.tags ? JSON.parse(row.tags) : [], source: row.source,
-      embedding: row.embedding, createdAt: row.created_at, updatedAt: row.updated_at
+      id: row.id ?? null,
+      title: row.title ?? '未命名记忆',
+      content: row.content ?? '',
+      tags,
+      source: row.source ?? 'manual',
+      embedding: row.embedding ?? null,
+      createdAt: row.created_at ?? null,
+      updatedAt: row.updated_at ?? null
     };
   }
 

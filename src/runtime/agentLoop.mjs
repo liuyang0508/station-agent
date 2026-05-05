@@ -66,16 +66,80 @@ export class AgentLoop {
     const recent = this.history.slice(-this.loopThreshold);
     const outputs = recent.map(h => h.output);
 
+    // Check exact equality first (fast path)
     if (outputs.every(o => o === outputs[0])) {
       return true;
     }
 
-    const hashes = outputs.map(o => this._simpleHash(o));
-    if (hashes.every(h => h === hashes[0])) {
+    // Normalize outputs: remove timestamps, UUIDs, random strings
+    const normalized = outputs.map(o => this._normalizeOutput(o));
+
+    // Check if normalized outputs are identical
+    const normalizedHashes = normalized.map(o => this._simpleHash(o));
+    if (normalizedHashes.every(h => h === normalizedHashes[0])) {
       return true;
     }
 
+    // Check token-based similarity (n-gram overlap)
+    const similarity = this._calculateSimilarity(normalized);
+    if (similarity >= 0.85) {
+      return true;
+    }
+
+    // Check for repeated action patterns
+    const actions = recent.map(h => h.action).filter(Boolean);
+    if (actions.length >= this.loopThreshold) {
+      const actionStr = actions.join('|');
+      const actionHash = this._simpleHash(actionStr);
+      const firstActionRepetition = actions[0].repeat(Math.ceil(actions.length / actions[0].length));
+      if (actionHash === this._simpleHash(firstActionRepetition)) {
+        return true;
+      }
+    }
+
     return false;
+  }
+
+  _normalizeOutput(output) {
+    if (!output || typeof output !== 'string') return '';
+
+    let normalized = output;
+
+    // Remove ISO timestamps
+    normalized = normalized.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, '<TS>');
+
+    // Remove Unix timestamps (10-13 digits)
+    normalized = normalized.replace(/\b\d{10,13}\b/g, '<NUM>');
+
+    // Remove UUIDs
+    normalized = normalized.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<UUID>');
+
+    // Remove hex strings (like file hashes)
+    normalized = normalized.replace(/\b[0-9a-f]{32,64}\b/gi, '<HEX>');
+
+    // Normalize whitespace
+    normalized = normalized.replace(/\s+/g, ' ').trim();
+
+    return normalized;
+  }
+
+  _calculateSimilarity(outputs) {
+    if (outputs.length < 2) return 0;
+
+    // Calculate token-based Jaccard similarity
+    const tokenSets = outputs.map(o => new Set(o.split(/\s+/).filter(t => t.length > 2)));
+
+    let totalIntersection = 0;
+    let totalUnion = 0;
+
+    for (let i = 1; i < tokenSets.length; i++) {
+      const intersection = new Set([...tokenSets[0]].filter(x => tokenSets[i].has(x)));
+      const union = new Set([...tokenSets[0], ...tokenSets[i]]);
+      totalIntersection += intersection.size;
+      totalUnion += union.size;
+    }
+
+    return totalUnion > 0 ? totalIntersection / totalUnion : 0;
   }
 
   _simpleHash(str) {

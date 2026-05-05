@@ -478,7 +478,10 @@ async function handleApi(req, res) {
           console.error('Failed to generate embedding:', err);
         });
       } catch (err) {
-        // Silently ignore duplicate or invalid memory
+        // Skip on duplicate but log other errors for debugging
+        if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
+          console.warn(`[memory] Failed to create memory: ${err.message}`);
+        }
       }
     }
 
@@ -625,6 +628,51 @@ async function handleApi(req, res) {
       // Apply evolution automatically
       const applied = await evolution.evolve(skillId, suggestion);
       sendJson(res, 200, { evolved: true, suggestion, applied });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // POST /api/skills/:id/rollback - Rollback a skill from an evolution entry
+  if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'rollback') {
+    try {
+      const skillId = parts[2];
+      const body = await parseJson(req);
+      const { evolutionEntryId } = body;
+
+      if (!skillId) {
+        sendJson(res, 400, { error: 'skillId required' });
+        return;
+      }
+
+      const evolution = new SkillEvolution(store);
+      const result = await evolution.rollbackSkill(skillId, evolutionEntryId);
+
+      if (result.success) {
+        sendJson(res, 200, result);
+      } else {
+        sendJson(res, 400, result);
+      }
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // GET /api/skills/:id/backups - List available backups for a skill
+  if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'skills' && parts[3] === 'backups') {
+    try {
+      const skillId = parts[2];
+
+      if (!skillId) {
+        sendJson(res, 400, { error: 'skillId required' });
+        return;
+      }
+
+      const evolution = new SkillEvolution(store);
+      const backups = evolution.listBackups(skillId);
+      sendJson(res, 200, { backups });
     } catch (error) {
       sendJson(res, 400, { error: error.message });
     }
@@ -1032,8 +1080,18 @@ async function handleApi(req, res) {
     }
     try {
       const wsRoot = store.getSettings().workspaceRoot;
-      const oldContent = fs.readFileSync(path.resolve(wsRoot, oldPath), 'utf8');
-      const newContent = fs.readFileSync(path.resolve(wsRoot, newPath), 'utf8');
+      const oldPathValidation = validateWorkspacePath(wsRoot, path.resolve(wsRoot, oldPath));
+      if (!oldPathValidation.allowed) {
+        sendJson(res, 403, { error: `oldPath: ${oldPathValidation.reason}` });
+        return;
+      }
+      const newPathValidation = validateWorkspacePath(wsRoot, path.resolve(wsRoot, newPath));
+      if (!newPathValidation.allowed) {
+        sendJson(res, 403, { error: `newPath: ${newPathValidation.reason}` });
+        return;
+      }
+      const oldContent = fs.readFileSync(oldPathValidation.target, 'utf8');
+      const newContent = fs.readFileSync(newPathValidation.target, 'utf8');
       const result = renderDiffAsText(oldContent, newContent);
       sendJson(res, 200, result);
     } catch (error) {
@@ -1076,7 +1134,12 @@ async function handleApi(req, res) {
         const existing = store.listSkills();
         for (const skill of skills) {
           if (!existing.find(s => s.name === skill.name)) {
-            try { store.installSkill(skill); } catch { /* skip dup */ }
+            try { store.installSkill(skill); } catch (err) {
+            // Skip on duplicate (SQLITE_CONSTRAINT) but log other errors
+            if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
+              console.warn(`[import] Failed to import skill "${skill.name}": ${err.message}`);
+            }
+          }
           }
         }
       }
@@ -1084,7 +1147,12 @@ async function handleApi(req, res) {
         const existing = store.listMemories();
         for (const mem of memories) {
           if (!existing.find(m => m.title === mem.title)) {
-            try { store.createMemory({ title: mem.title, content: mem.content, tags: mem.tags, source: 'imported' }); } catch { /* skip dup */ }
+            try { store.createMemory({ title: mem.title, content: mem.content, tags: mem.tags, source: 'imported' }); } catch (err) {
+              // Skip on duplicate but log other errors
+              if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
+                console.warn(`[import] Failed to import memory "${mem.title}": ${err.message}`);
+              }
+            }
           }
         }
       }
@@ -1092,7 +1160,12 @@ async function handleApi(req, res) {
         const existing = store.listMcpServers();
         for (const srv of mcpServers) {
           if (!existing.find(s => s.name === srv.name)) {
-            try { store.createMcpServer({ name: srv.name, command: srv.command, args: srv.args, cwd: srv.cwd, enabled: false }); } catch { /* skip dup */ }
+            try { store.createMcpServer({ name: srv.name, command: srv.command, args: srv.args, cwd: srv.cwd, enabled: false }); } catch (err) {
+              // Skip on duplicate but log other errors
+              if (err.code !== 'SQLITE_CONSTRAINT' && err.code !== '23505') {
+                console.warn(`[import] Failed to import MCP server "${srv.name}": ${err.message}`);
+              }
+            }
           }
         }
       }
