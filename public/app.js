@@ -30,6 +30,56 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 
+// ── Toast Notification System ──
+class Toast {
+  static container = null;
+  static queue = [];
+
+  static init() {
+    this.container = document.getElementById('toastContainer');
+  }
+
+  static show(message, type = 'info', duration = 4000) {
+    if (!this.container) this.init();
+    if (this.queue.length >= 3) {
+      this.dismiss(this.queue.shift());
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+    toast.innerHTML = `
+      <span class="toast-icon">${icons[type] || icons.info}</span>
+      <span class="toast-message">${message}</span>
+      <button class="toast-close">×</button>
+    `;
+    const closeBtn = toast.querySelector('.toast-close');
+    closeBtn.addEventListener('click', () => this.dismiss(toast));
+    this.container.appendChild(toast);
+    this.queue.push(toast);
+    if (duration > 0) {
+      toast.timer = setTimeout(() => this.dismiss(toast), duration);
+    }
+    toast.addEventListener('mouseenter', () => {
+      if (toast.timer) clearTimeout(toast.timer);
+    });
+    toast.addEventListener('mouseleave', () => {
+      toast.timer = setTimeout(() => this.dismiss(toast), duration);
+    });
+  }
+
+  static dismiss(toast) {
+    if (!toast || !toast.parentNode) return;
+    toast.classList.add('toast-out');
+    setTimeout(() => toast.remove(), 200);
+    this.queue = this.queue.filter(t => t !== toast);
+  }
+
+  static success(msg, duration) { this.show(msg, 'success', duration); }
+  static error(msg, duration) { this.show(msg, 'error', duration); }
+  static warn(msg, duration) { this.show(msg, 'warning', duration); }
+  static info(msg, duration) { this.show(msg, 'info', duration); }
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: {
@@ -1187,6 +1237,7 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  Toast.init();
   try {
     await loadBaseData();
     // Initialize tabs from sessions
