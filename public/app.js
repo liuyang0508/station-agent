@@ -1530,11 +1530,36 @@ class ContextMenu {
   }
 }
 
+// ── Dropdown Menu ──
+class Dropdown {
+  static initAll() {
+    document.querySelectorAll('.dropdown').forEach(el => this.init(el));
+  }
+
+  static init(el) {
+    const trigger = el.querySelector('.dropdown-trigger');
+    const menu = el.querySelector('.dropdown-menu');
+    if (!trigger || !menu) return;
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isVisible = menu.classList.contains('visible');
+      this.closeAll();
+      if (!isVisible) menu.classList.add('visible');
+    });
+  }
+
+  static closeAll() {
+    document.querySelectorAll('.dropdown-menu.visible').forEach(m => m.classList.remove('visible'));
+  }
+}
+
 async function init() {
   bindEvents();
   Toast.init();
   Modal.init();
   ContextMenu.init();
+  Dropdown.initAll();
   setupGlobalShortcuts();
   try {
     await loadBaseData();
