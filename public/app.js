@@ -1669,6 +1669,25 @@ function exportCurrentSession() {
   document.body.removeChild(link);
 }
 
+// ── Tooltip ──
+function showTooltip(el, message) {
+  let tip = el._tooltipEl;
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'tooltip';
+    el._tooltipEl = tip;
+    el.appendChild(tip);
+    el.addEventListener('mouseenter', () => tip.classList.add('visible'));
+    el.addEventListener('mouseleave', () => tip.classList.remove('visible'));
+  }
+  tip.textContent = message;
+  tip.classList.add('visible');
+}
+
+function hideTooltip(el) {
+  if (el._tooltipEl) el._tooltipEl.classList.remove('visible');
+}
+
 init();
 
 // Initialize highlight.js
