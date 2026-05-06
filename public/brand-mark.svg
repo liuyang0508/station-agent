@@ -2,27 +2,77 @@
   <defs>
     <linearGradient id="sGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#A855F7"/>
-      <stop offset="100%" stop-color="#8B5CF6"/>
+      <stop offset="50%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="sGradLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C084FC"/>
+      <stop offset="100%" stop-color="#A855F7"/>
     </linearGradient>
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="2" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feComposite in="blur" in2="SourceGraphic" operator="over"/>
+    </filter>
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#A855F7" flood-opacity="0.3"/>
     </filter>
   </defs>
-  <!-- Platform base -->
-  <rect x="6" y="30" width="36" height="4" rx="2" fill="url(#sGrad)" opacity="0.9"/>
-  <!-- Left pillar -->
-  <rect x="12" y="18" width="4" height="14" rx="2" fill="url(#sGrad)" opacity="0.8"/>
-  <!-- Right pillar -->
-  <rect x="32" y="18" width="4" height="14" rx="2" fill="url(#sGrad)" opacity="0.8"/>
-  <!-- Roof/Canopy -->
-  <path d="M8 18 L24 8 L40 18 Z" fill="url(#sGrad)" opacity="0.7"/>
-  <!-- Center indicator dot -->
-  <circle cx="24" cy="24" r="3" fill="url(#sGrad)" filter="url(#glow)"/>
-  <!-- Signal waves -->
-  <path d="M18 20 Q24 16 30 20" fill="none" stroke="url(#sGrad)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-  <path d="M15 22 Q24 17 33 22" fill="none" stroke="url(#sGrad)" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+
+  <!-- Outer hexagon ring -->
+  <polygon
+    points="24,4 42,14 42,34 24,44 6,34 6,14"
+    fill="none"
+    stroke="url(#sGrad)"
+    stroke-width="1.5"
+    stroke-linejoin="round"
+    opacity="0.9"
+  />
+
+  <!-- Inner hexagon -->
+  <polygon
+    points="24,10 36,17 36,31 24,38 12,31 12,17"
+    fill="url(#sGrad)"
+    opacity="0.15"
+  />
+
+  <!-- Central diamond/rhombus -->
+  <polygon
+    points="24,14 32,21 24,28 16,21"
+    fill="url(#sGradLight)"
+    filter="url(#softShadow)"
+  />
+
+  <!-- Inner diamond accent -->
+  <polygon
+    points="24,18 28,21 24,24 20,21"
+    fill="url(#sGrad)"
+  />
+
+  <!-- Orbital ring 1 -->
+  <ellipse
+    cx="24" cy="21"
+    rx="14"
+    ry="6"
+    fill="none"
+    stroke="url(#sGrad)"
+    stroke-width="1"
+    stroke-dasharray="2 3"
+    opacity="0.4"
+    transform="rotate(-20 24 21)"
+  />
+
+  <!-- Orbital ring 2 -->
+  <ellipse
+    cx="24" cy="21"
+    rx="10"
+    ry="4"
+    fill="none"
+    stroke="url(#sGradLight)"
+    stroke-width="0.75"
+    opacity="0.25"
+    transform="rotate(30 24 21)"
+  />
+
+  <!-- Glow dot -->
+  <circle cx="24" cy="21" r="2" fill="url(#sGradLight)" filter="url(#glow)"/>
 </svg>

@@ -64,14 +64,20 @@
           <section class="chat-column" id="viewChat">
             <div class="message-feed" id="messageFeed"></div>
             <div class="terminal-output" id="terminalOutput"></div>
-            <form class="composer" id="composer">
-              <div class="composer-toolbar">
-                <button type="button" id="skillPickerBtn" class="toolbar-btn" title="选择技能">🛠</button>
-                <select id="skillPickerSelect" class="skill-picker-select hidden">
-                  <option value="">使用技能...</option>
-                </select>
+            <div class="skill-picker-panel hidden" id="skillPickerPanel">
+              <div class="skill-picker-header">
+                <span>选择技能</span>
+                <button type="button" id="skillPickerCloseBtn" class="skill-picker-close">×</button>
               </div>
-              <textarea id="promptInput" rows="3" placeholder="交给 Agent 的任务"></textarea>
+              <div class="skill-picker-list" id="skillPickerList"></div>
+            </div>
+            <form class="composer" id="composer">
+              <div class="composer-input-wrapper">
+                <button type="button" id="skillPickerBtn" class="skill-picker-inline" title="选择技能 (/)">
+                  <span>🛠</span>
+                </button>
+                <div id="promptInput" class="prompt-editor" contenteditable="true" data-placeholder="交给 Agent 的任务"></div>
+              </div>
               <div class="composer-actions">
                 <button type="button" id="voiceInputBtn" class="voice-btn" title="语音输入">🎤</button>
                 <button id="sendButton" type="submit">发送</button>

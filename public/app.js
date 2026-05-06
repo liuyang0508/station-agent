@@ -4,6 +4,7 @@ const state = {
   sessions: [],
   messages: [],
   skills: [],
+  selectedSkill: null,
   connectors: [],
   mcpServers: [],
   tasks: [],
@@ -1226,6 +1227,9 @@ async function sendPrompt(prompt) {
   state.trace = [];
   thinkingContent = '';
 
+  // Prepend skill command if skill is selected
+  const actualPrompt = state.selectedSkill ? `/skill ${state.selectedSkill.name} ${prompt}` : prompt;
+
   // Show thinking panel with pending indicator
   const thinkEl = $('#thinkingContent');
   if (thinkEl) {
@@ -1241,14 +1245,14 @@ async function sendPrompt(prompt) {
   state.messages.push({
     id: `local-${Date.now()}`,
     role: 'user',
-    content: prompt,
+    content: actualPrompt,
     createdAt: new Date().toISOString()
   });
   render();
 
   const { runId } = await api('/api/runs', {
     method: 'POST',
-    body: JSON.stringify({ sessionId: state.activeSessionId, prompt })
+    body: JSON.stringify({ sessionId: state.activeSessionId, prompt: actualPrompt })
   });
 
   state.currentRunId = runId;
@@ -1312,13 +1316,21 @@ async function sendPrompt(prompt) {
   };
 }
 
+let skillJustSelected = false;
+let skillJustSelectedTimeout = null;
+
 function bindEvents() {
   $('#composer').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (skillJustSelected) {
+      clearTimeout(skillJustSelectedTimeout);
+      skillJustSelected = false;
+      return;
+    }
     const input = $('#promptInput');
-    const prompt = input.value.trim();
+    const prompt = input.textContent.trim();
     if (!prompt || state.sending) return;
-    input.value = '';
+    input.textContent = '';
     await sendPrompt(prompt);
   });
 
@@ -1341,44 +1353,194 @@ function bindEvents() {
     render();
   });
 
-  // Skill picker in composer
+  // Skill picker panel in composer
   const skillPickerBtn = $('#skillPickerBtn');
-  const skillPickerSelect = $('#skillPickerSelect');
+  const skillPickerPanel = $('#skillPickerPanel');
+  const skillPickerList = $('#skillPickerList');
+  const skillPickerCloseBtn = $('#skillPickerCloseBtn');
+  const skillInline = $('#skillInline');
+  const skillInlineName = $('#skillInlineName');
+  const removeSkillInlineBtn = $('#removeSkillInlineBtn');
+  let selectedSkillIndex = -1;
+  state.selectedSkill = null;
 
-  if (skillPickerBtn && skillPickerSelect) {
-    skillPickerBtn.addEventListener('click', () => {
-      skillPickerSelect.classList.toggle('hidden');
-      if (!skillPickerSelect.classList.contains('hidden')) {
-        // Populate skills
-        skillPickerSelect.innerHTML = '<option value="">使用技能...</option>' +
-          state.skills.filter(s => s.enabled).map(s =>
-            `<option value="${s.id}">${escapeText(s.name)}</option>`
-          ).join('');
-        skillPickerSelect.focus();
-      }
-    });
+  function selectSkill(skill) {
+    // Immediately set blocking flag
+    clearTimeout(skillJustSelectedTimeout);
+    skillJustSelected = true;
 
-    skillPickerSelect.addEventListener('change', () => {
-      const skillId = skillPickerSelect.value;
-      if (skillId) {
-        const skill = state.skills.find(s => s.id === skillId);
+    state.selectedSkill = skill;
+
+    const promptInput = $('#promptInput');
+    if (promptInput) {
+      // Insert skill pill at the BEGINNING
+      const skillHtml = `<span class="skill-inline">${escapeText(skill.name)}</span> `;
+      promptInput.insertAdjacentHTML('afterbegin', skillHtml);
+
+      // Move cursor to the END (after all content including the skill pill)
+      promptInput.focus();
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(promptInput);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    // Hide panel after delay
+    setTimeout(() => {
+      hideSkillPickerPanel();
+      skillJustSelected = false;
+    }, 300);
+  }
+
+  function clearSelectedSkill() {
+    state.selectedSkill = null;
+    const promptInput = $('#promptInput');
+    if (promptInput) {
+      const skillEl = promptInput.querySelector('.skill-inline');
+      if (skillEl) skillEl.remove();
+    }
+    skillPickerBtn?.classList.remove('active');
+  }
+
+  function renderSkillInline() {
+    // Handled in selectSkill/clearSelectedSkill
+  }
+
+  function renderSkillPickerPanel() {
+    const enabledSkills = state.skills.filter(s => s.enabled);
+    if (enabledSkills.length === 0) {
+      skillPickerList.innerHTML = '<div class="skill-picker-empty">暂无技能</div>';
+      return;
+    }
+    skillPickerList.innerHTML = enabledSkills.map((s, i) => `
+      <div class="skill-picker-item ${i === selectedSkillIndex ? 'selected' : ''}" data-skill-index="${i}">
+        <div class="skill-picker-item-icon">🛠</div>
+        <div class="skill-picker-item-info">
+          <div class="skill-picker-item-name">${escapeText(s.name)}</div>
+          <div class="skill-picker-item-desc">${escapeText(s.description || '无描述')}</div>
+        </div>
+      </div>
+    `).join('');
+
+    skillPickerList.querySelectorAll('.skill-picker-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const idx = parseInt(item.dataset.skillIndex);
+        const skill = enabledSkills[idx];
         if (skill) {
-          // Insert skill invocation into prompt
-          const input = $('#promptInput');
-          input.value = `/skill ${skill.name} ${input.value}`.trim();
-          input.focus();
+          selectSkill(skill);
+          return false;
         }
-      }
-      skillPickerSelect.classList.add('hidden');
+      });
+    });
+  }
+
+  function showSkillPickerPanel() {
+    selectedSkillIndex = state.selectedSkill
+      ? state.skills.filter(s => s.enabled).findIndex(s => s.id === state.selectedSkill.id)
+      : -1;
+    if (selectedSkillIndex < 0) selectedSkillIndex = 0;
+    renderSkillPickerPanel();
+    skillPickerPanel.classList.remove('hidden');
+  }
+
+  function hideSkillPickerPanel() {
+    skillPickerPanel.classList.add('hidden');
+  }
+
+  if (skillPickerBtn && skillPickerPanel) {
+    // Prevent clicks on panel from propagating to form
+    skillPickerPanel.addEventListener('click', (e) => {
+      e.stopPropagation();
     });
 
-    // Hide select when clicking outside
+    skillPickerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = skillPickerPanel.classList.contains('hidden');
+      if (isHidden) {
+        showSkillPickerPanel();
+      } else {
+        hideSkillPickerPanel();
+      }
+    });
+
+    skillPickerCloseBtn?.addEventListener('click', () => {
+      hideSkillPickerPanel();
+    });
+
+    removeSkillInlineBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearSelectedSkill();
+    });
+
     document.addEventListener('click', (e) => {
-      if (!skillPickerBtn.contains(e.target) && !skillPickerSelect.contains(e.target)) {
-        skillPickerSelect.classList.add('hidden');
+      if (!skillPickerPanel.contains(e.target) && e.target !== skillPickerBtn) {
+        hideSkillPickerPanel();
       }
     });
   }
+
+  // "/" shortcut to open skill picker
+  const promptInput = $('#promptInput');
+  if (promptInput) {
+    promptInput.addEventListener('keydown', (e) => {
+      // "/" to open skill picker
+      if (e.key === '/' && skillPickerPanel.classList.contains('hidden')) {
+        const enabledSkills = state.skills.filter(s => s.enabled);
+        if (enabledSkills.length > 0) {
+          e.preventDefault();
+          selectedSkillIndex = 0;
+          renderSkillPickerPanel();
+          skillPickerPanel.classList.remove('hidden');
+        }
+        return;
+      }
+      // Arrow keys, Enter, Escape when panel is open
+      if (!skillPickerPanel.classList.contains('hidden')) {
+        const enabledSkills = state.skills.filter(s => s.enabled);
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          selectedSkillIndex = Math.min(selectedSkillIndex + 1, enabledSkills.length - 1);
+          renderSkillPickerPanel();
+          const selectedEl = skillPickerList.querySelector('.skill-picker-item.selected');
+          selectedEl?.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          selectedSkillIndex = Math.max(selectedSkillIndex - 1, 0);
+          renderSkillPickerPanel();
+          const selectedEl = skillPickerList.querySelector('.skill-picker-item.selected');
+          selectedEl?.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' && selectedSkillIndex >= 0) {
+          e.preventDefault();
+          const skill = enabledSkills[selectedSkillIndex];
+          if (skill) {
+            selectSkill(skill);
+          }
+        } else if (e.key === 'Escape') {
+          hideSkillPickerPanel();
+        }
+      }
+    });
+  }
+
+  // Also handle "/" at document level (fallback)
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/') return;
+    if (document.activeElement?.tagName === 'TEXTAREA') return;
+    if (skillPickerPanel.classList.contains('hidden')) {
+      const enabledSkills = state.skills.filter(s => s.enabled);
+      if (enabledSkills.length > 0) {
+        e.preventDefault();
+        promptInput?.focus();
+        selectedSkillIndex = 0;
+        renderSkillPickerPanel();
+        skillPickerPanel.classList.remove('hidden');
+      }
+    }
+  });
 
   $('#exportSessionButton').addEventListener('click', () => {
     if (!state.activeSessionId) return;
