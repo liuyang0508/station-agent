@@ -5,18 +5,18 @@
 export class DecisionValidator {
   constructor() {
     this.rules = [
-      // 范围蔓延检测
+      // 范围蔓延检测 — 决策关键词与目标关键词无重叠时警告
       {
         type: 'scope_creep',
         severity: 'warn',
         check: (decision, context) => {
-          if (context.goal && decision.content) {
-            const goalKeywords = this._extractKeywords(context.goal);
-            const decisionKeywords = this._extractKeywords(decision.content);
-            const overlap = goalKeywords.filter(k => decisionKeywords.includes(k));
-            return overlap.length > 0;
-          }
-          return true;
+          if (!context.goal || !decision.content) return true;
+          const goalKeywords = this._extractKeywords(context.goal);
+          const decisionKeywords = this._extractKeywords(decision.content);
+          if (goalKeywords.length === 0) return true;
+          const overlap = goalKeywords.filter(k => decisionKeywords.includes(k));
+          // 降低阈值到 15%，允许轻微词根变化（如 auth ~ authent）
+          return overlap.length >= Math.max(1, goalKeywords.length * 0.15);
         }
       },
       // 决策一致性检测
@@ -24,11 +24,11 @@ export class DecisionValidator {
         type: 'consistency',
         severity: 'block',
         check: (decision, context) => {
-          if (!context.history || context.history.length < 2) return true;
+          if (!context.history || context.history.length < 1) return true;
 
           const recent = context.history.slice(-3);
           for (const h of recent) {
-            if (h.role === 'assistant' && h.content !== decision.content) {
+            if (h.role === 'assistant') {
               if (this._isReversal(decision.content, h.content)) {
                 return false;
               }
@@ -87,7 +87,7 @@ export class DecisionValidator {
       /actually no/, /wait/, /actually,/
     ];
     const hasReversal = reversalPatterns.some(p => newContent.match(p));
-    return hasReversal && this._similarity(newContent, oldContent) > 0.3;
+    return hasReversal && this._similarity(newContent, oldContent) > 0.2;
   }
 
   _similarity(a, b) {

@@ -20,7 +20,7 @@ export class ConstraintEnforcer {
         type: ConstraintType.HARD,
         rule: (action) => {
           const destructivePatterns = [
-            /rm\s+-rf/, /del\s+\/s\/q/i, /format/i,
+            /rm\s+-rf/, /del(\s+\/?[sq])?(?:\s+C:)?/i, /format/i,
             /drop\s+table/i, /delete\s+from\s+\*/i
           ];
           const cmd = action.command || action.content || '';
@@ -34,7 +34,8 @@ export class ConstraintEnforcer {
         rule: (action, context) => {
           if (!context.workspaceRoot) return true;
           const cmd = action.command || '';
-          return !cmd.match(/^\.\.\//);
+          // Block any .. path segment anywhere in command
+          return !cmd.match(/(^|\s)\.\.\//);
         },
         message: '操作必须在工作区内'
       },
